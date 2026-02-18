@@ -5,7 +5,7 @@
  
 % TODO REVIEW: Insert your submission number below by replacing '*****'
 % TODO FINAL: Comment out the following line for the camera-ready version
-\usepackage[review,year=2026,ID=*****]{eccv}
+\usepackage[review,year=2026,ID=153]{eccv}
 % TODO FINAL: Un-comment the following line for the camera-ready version
 %\usepackage{eccv}
 
@@ -53,7 +53,7 @@
 
 % ---------------------------------------------------------------
 % TODO REVIEW: Replace with your title
-\title{Author Guidelines for ECCV Submission} 
+\title{OREO: Generalizing 3D Native Generators with On-Policy Rendering-Editing Optimization} 
 
 % TODO REVIEW: If the paper title is too long for the running head, you can set
 % an abbreviated paper title here. If not, comment out.
@@ -82,11 +82,12 @@ ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
 
 
 \begin{abstract}
-  The abstract should concisely summarize the contents of the paper. 
-  While there is no fixed length restriction for the abstract, it is recommended to limit your abstract to approximately 150 words.
-  Please include keywords as in the example below. 
-  This is required for papers in LNCS proceedings.
-  \keywords{First keyword \and Second keyword \and Third keyword}
+  Despite the progress of 3D native generators, the scarcity of diverse 3D data confines them to limited distributions, causing severe misalignment on complex and non-canonical structures. 
+  To address this, we propose \textbf{On-Policy Rendering Editing Optimization (OREO)}, which reformulates the post-training of 3D native generators as an on-policy distillation process with dense supervision on rendered views, \textbf{leveraging external 2D priors to learn from in-the-wild images}. 
+  At its core, the \textbf{Reinforced Editing Distillation (RED)} algorithm leverages a pre-trained 2D editing model with an improved FlowEdit strategy to generate geometrically consistent pseudo-ground truths on rendered views, which are then backpropagated via a differentiable renderer with a \textbf{contrastive objective} to ensure stability. 
+  OREO constructs a differentiable rollout for Backpropagation Through Time, supplemented by 3D Native Regularization to prevent geometric degradation. 
+  Experiments show OREO outperforms supervised baselines on highly stylized and imaginative inputs, achieving superior conceptual consistency and detail restoration to mitigate the 3D data scarcity.
+  \keywords{3D Generation \and On-Policy Distillation \and Image Editing \and Flow Matching \and Differentiable Rendering}
 \end{abstract}
 
 
