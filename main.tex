@@ -5,6 +5,7 @@
  
 % TODO REVIEW: Insert your submission number below by replacing '*****'
 % TODO FINAL: Comment out the following line for the camera-ready version
+
 \usepackage[review,year=2026,ID=153]{eccv}
 % TODO FINAL: Un-comment the following line for the camera-ready version
 %\usepackage{eccv}
@@ -82,30 +83,34 @@ ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
 
 
 \begin{abstract}
-  While 3D native generators have made significant strides, their generalization to highly stylized and non-canonical scenarios remains constrained by the scarcity of diverse 3D training data, often resulting in geometric distortions and conceptual misalignment.
-  To address this challenge, we introduce \textbf{OREO}, a novel post-training paradigm that leverages the rich visual priors of pre-trained 2D models to compensate for 3D data paucity by establishing a ``Render-Edit-Distill-Optimize'' loop.
-  At the core of our framework lies the \textbf{Reinforced Editing Distillation (RED)} algorithm. RED employs an enhanced FlowEdit strategy to inject target concepts into rendered views while preserving the original viewpoint, thereby generating geometrically consistent pseudo-ground truths. 
-  These signals are subsequently distilled via a Contrastive Distillation Loss to ensure stable optimization.
-  Built upon a Differentiable Rollout, OREO utilizes Backpropagation through the Trajectory to propagate terminal editing signals back to each generation step. 
-  Furthermore, we incorporate a 3D Native Regularization to prevent geometric degradation from aggressive editing.
+  Despite the success of 3D native generators, they often struggle to generalize to highly stylized scenarios, resulting in geometric or textual misalignment, due to the scarcity of diverse 3D training data.
+  To address this challenge, we introduce \textbf{OREO}, a novel post-training paradigm that compensates for 3D data scarcity by leveraging pre-trained 2D diffusion priors within an on-policy \textit{Render-Edit-Optimize} loop.
+  At the core of our framework lies the \textbf{Reinforced Editing Distillation (RED)} algorithm. 
+  RED employs an enhanced FlowEdit strategy to edit the rendered views, reinforcing target concepts in a view-preserving manner, thereby yielding geometrically consistent pseudo-ground truths. 
+  To optimize the 3D generator, these view-space signals are leveraged via a contrastive distillation loss, with the resulting gradients backpropagated through the entire generation trajectory. 
+  To prevent geometric degradation, along with the editing backpropagation, we incorporate a 3D native regularization that propagates structural constraints back to early generation steps.
   Extensive experiments demonstrate that OREO significantly outperforms supervised baselines on complex creative inputs, achieving superior conceptual alignment and geometric integrity, effectively mitigating the limitations of 3D data scarcity.
   \keywords{3D Generation \and On-Policy Distillation \and Image Editing \and Flow Matching \and Differentiable Rendering}
 \end{abstract}
 
+% NOTE: Terminology Distinction
+% - Semantic: Refers to high-level understanding, knowledge, and alignment (e.g., "semantic priors", "semantic misalignment").
+% - Concept: Refers to specific objects, attributes, or content being generated/injected (e.g., "inject target concepts", "complex concepts").
 
 \section{Introduction}
 \label{sec:intro}
 
-In recent years, 3D native generators such as Trellis and Hunyuan3D have demonstrated remarkable capabilities in automating high-quality 3D content creation. 
-The current mainstream paradigm primarily relies on pre-training on large-scale 3D datasets. 
-However, constrained by the prohibitive cost of 3D asset construction, existing 3D datasets lag far behind the 2D image domain in terms of diversity, which severely limits the generalization capability of models in non-canonical scenarios. 
-This limitation is particularly critical in practical applications: when users attempt to create content that is imaginative, highly stylized, or even detached from realistic prototypes, pre-trained models often fail due to a lack of geometric priors, resulting in distorted structures or conceptual misalignment.
+In recent years, 3D native generators such as Trellis and Hunyuan3D series have demonstrated remarkable capabilities in automating high-quality 3D content creation. 
+The current mainstream paradigm relies heavily on pre-training with large-scale 3D datasets; however, due to the prohibitive cost of 3D asset construction, these datasets lag far behind the 2D domain in diversity, severely limiting model generalization in non-canonical scenarios. 
+This bottleneck is particularly evident in the critical stage of 3D concept design. 
+This creative process inherently requires generating imaginative and highly stylized assets that often deviate significantly from realistic prototypes found in standard datasets.
+In such scenarios, pre-trained models often fail to generalize, resulting in distorted structures or severe semantic misalignment due to the absence of corresponding 3D prototypes in the training data.
 
-To address this challenge, our core insight is that while 3D data lacks diversity, 2D image editing models encapsulate rich general visual knowledge and can serve as ideal ``teachers''. 
-By introducing these external priors into training, we can transfer the generalization capabilities of the 2D domain to 3D generation tasks. 
+To address this challenge, our core insight is to distill the rich semantic and general visual knowledge from pre-trained 2D diffusion models into 3D generators, thereby enabling the creation of conceptually aligned assets even in data-scarce domains. 
 Based on this philosophy, we propose the \textbf{OREO (On-Policy Rendering Editing Optimization)} framework. 
-This framework discards the traditional 3D supervised paradigm in favor of a ``Render-Edit-Distill-Optimize'' loop, reformulating post-training as an on-policy distillation process with dense supervision on rendered views. 
-In this way, OREO can directly leverage feedback from the 2D teacher to optimize the 3D model, thereby eliminating the dependency on expensive 3D ground truth.
+In this context, we view the 3D generator as a \textit{policy} that dictates the trajectory from noise to 3D assets.
+Unlike traditional supervised learning that relies on static datasets (off-policy), OREO establishes an \textbf{on-policy} \textit{Render-Edit-Optimize} loop: the model is optimized directly on the views rendered from its \textit{current} generation trajectory.
+This allows the generator to receive immediate feedback on its own artifacts from the 2D teacher, effectively bridging the domain gap through self-correction rather than static imitation.
 
 At the heart of this loop is the \textbf{Reinforced Editing Distillation (RED)} algorithm, which provides high-quality supervision signals to the 3D model through two synergistic steps: ``editing'' and ``distillation''. 
 First, we treat the rendered image as a ``state sample'' of the student model under the current policy and utilize a pre-trained 2D editing model as a ``teacher'' to provide immediate corrections. 
@@ -122,400 +127,198 @@ Geometric constraints from later steps can influence parameter updates in earlie
 In summary, our contributions are primarily threefold:
 \begin{enumerate}
     \item We pioneer a novel post-training paradigm for 3D generative models, \textbf{OREO}. 
-    Addressing the generalization bottleneck of pre-trained models in highly stylized and non-canonical scenarios, OREO effectively resolves the issue of insufficient training data diversity by constructing a ``Render-Edit-Distill-Optimize'' closed-loop mechanism.
+    Addressing the generalization bottleneck of pre-trained models in highly stylized and non-canonical scenarios, OREO effectively resolves the issue of insufficient training data diversity by constructing a \textit{Render-Edit-Optimize} closed-loop mechanism.
     \item We propose the \textbf{Reinforced Editing Distillation (RED)} algorithm combined with a fully differentiable optimization mechanism. 
     The former utilizes FlowEdit and Contrastive Distillation Loss to provide high-quality geometry-aware guidance, while the latter ensures optimization stability and geometric integrity through BPTT and 3D Native Regularization.
     \item We validate the effectiveness of our method on mainstream 3D generative models such as Trellis. 
     Experimental results show that OREO significantly enhances the model's generalization capability on complex creative inputs, surpassing supervised baselines in both conceptual alignment and geometric fidelity.
 \end{enumerate}
 
-\section{Initial Submission}
+\section{Method}
+\label{sec:method}
 
-\subsection{Language}
-All manuscripts must be in English.
+\subsection{Preliminaries}
 
+\subsubsection{On-Policy Distillation for 3D Generation.}
+We formalize the post-training of 3D generative models as an On-Policy Distillation problem. Given a student model (3D Generator) parameterized by $\theta$, the goal is to learn the distribution $p_{teacher}$ of a teacher model (2D Editor). Unlike offline distillation which relies on a fixed dataset $D = \{(x, y)\}$, On-Policy Distillation requires the student model to learn from trajectories $x \sim \pi_\theta$ generated by itself. This is achieved by minimizing the following divergence:
+\begin{equation}
+\mathbb{E}_{x \sim \pi_\theta} [ \mathcal{L}(x, \text{Teacher}(x)) ]
+\end{equation}
+This paradigm ensures that the model can correct geometric deviations generated during its own inference process in real-time, which is crucial for improving generation quality in highly stylized and non-canonical scenarios.
 
-\subsection{Template}
-Papers must be prepared with the official LNCS style from Springer.
-This applies to both review and camera-ready versions.
-Springer requires manuscripts to be prepared in \LaTeX{} (strongly encouraged) or Microsoft Word. 
+\subsubsection{3D Native Generation via Flow Matching.}
+Our goal is to optimize a 3D generative model $\mathcal{G}_\theta$ that has already been pre-trained on large-scale data. Unlike optimization methods initialized from scratch (e.g., DreamFusion), we leverage the pre-trained model as a strong geometric prior. Such models are typically based on the Flow Matching framework, where the generation process is modeled as an ODE integration from a prior distribution $z_T \sim \mathcal{N}(0, I)$ to the data distribution $z_0$:
+\begin{equation}
+dz_t = v_\theta(z_t, t) dt
+\end{equation}
+where $v_\theta$ is the velocity field predicted by the network. Given the current state $z_t$ and velocity $v_\theta$, we can derive an estimate of the final data $z_0$: $\hat{z}_0 = z_t - t \cdot v_\theta(z_t, t)$. Subsequently, a decoder converts $z_0$ into an explicit 3D asset (e.g., Gaussian Splats), which is then projected into 2D views via a differentiable renderer $\mathcal{R}$.
 
-Authors preparing their paper with \LaTeX{} must use the template provided by ECCV, which is based on the corresponding Springer class file \texttt{llncs.cls} but includes line numbers for review (\cref{sec:line-numbering}) and properly anonymizes the paper for review (as in this example document).
-Authors who -- for whatever reason -- cannot use \LaTeX{} can alternatively use the official LNCS Word template from Springer.
-However, it is the authors' responsibility to ensure that the resulting PDF file is consistent with this example paper and follows it as closely as possible (\ie, includes line numbers, is properly anonymized, \etc).
+\subsubsection{Instruction-based Image Editing.}
+The task of image editing is to transform a source image $x^{src}$ into a target image $x^{tgt}$ that conforms to a text instruction $y$, while preserving the original structure unrelated to the instruction. Formally, we seek a mapping $\mathcal{E}: (x^{src}, y) \to x^{tgt}$. In the OREO framework, this mapping $\mathcal{E}$ acts as a ``teacher'', providing pseudo-ground truths of ``what should be generated'' to the 3D model.
 
-We would like to stress that the class/style files and the template must not be manipulated and that the guidelines regarding font sizes and format must be adhered to. 
-For example, please refrain from using any \LaTeX{} or \TeX{} command that modifies the layout settings of the template (\eg, \verb+\textheight+, \verb+\vspace+, \verb+\baselinestretch+, \etc).
-Such manual layout adjustments should be limited to very exceptional cases.
-This is to ensure that the end product is as homogeneous as possible.
+\subsubsection{Why FlowEdit Algorithm?}
+In the OREO framework, we employ the \textbf{FlowEdit algorithm} to guide the inference process of the base editing model. Compared to default inference modes (e.g., direct sampling), FlowEdit offers unique advantages:
+\begin{enumerate}
+    \item \textbf{View Locking}: FlowEdit utilizes the parallelogram principle of flow matching to construct a target trajectory parallel to the source trajectory in the latent space. This mechanism implicitly imposes strong geometric constraints, ensuring that editing operations only modify texture and details (Identity) without altering the object's pose or silhouette (Geometry). In contrast, SDE-based methods tend to introduce random viewpoint shifts, leading to divergence in 3D optimization.
+    \item \textbf{Training-free \& Generalization}: FlowEdit does not require fine-tuning on specific datasets and can directly leverage the powerful priors of pre-trained Diffusion/Flow models, perfectly aligning with our goal of handling OOD data.
+    \item \textbf{Gradient Stability}: Based on deterministic ODE sampling, FlowEdit provides lower variance gradient estimates compared to stochastic SDE sampling.
+\end{enumerate}
 
-Papers that differ significantly from the required style may be rejected without review.
+\subsection{2D Guidance via Reinforced Editing Distillation}
 
+We utilize a pre-trained Flow Matching model $v_\varphi$ (Qwen-Image-Edit in this work) as the base to execute an improved version of the FlowEdit algorithm. To adapt to the 3D post-training task, we introduce three key improvements to the standard FlowEdit. \textbf{It is worth noting that the effectiveness of RED is built on the premise that the 2D editor can generate high-quality pseudo-ground truths (Pseudo-GT). We verify this in Section 4.1 through quantitative experiments, showing that the improved FlowEdit can significantly enhance conceptual consistency while effectively maintaining geometric integrity, thus qualifying for the role of a ``teacher''.}
 
-\subsubsection{Fonts.}
-Springer's templates for \LaTeX{} are based on CMR, and the XML templates for Word are based on Times. 
-We ask you to use the font according to the template used for your papers. 
-Specifically, please refrain from using Times when preparing your paper with \LaTeX{}.
-Using a different font can be interpreted as purposely circumventing the length limitations and may lead to rejection without review.
+\begin{enumerate}
+    \item \textbf{Negative Guidance}: We introduce a negative guidance scale $-s$ when calculating the source flow field $v^{src}$. This forces the model to identify and preserve features in the source image that do \textbf{not} match the prompt (usually background or geometry that should not be edited), thereby enhancing the locality of the edit.
+    \item \textbf{Dynamic Noise Correction}: Standard FlowEdit assumes fixed noise $\epsilon$. However, as the source flow field changes, fixed noise leads to trajectory deviation. We introduce a dynamic correction term that adjusts $\epsilon_t$ in real-time based on the gradient of the source flow field, ensuring the source trajectory remains anchored to the manifold of the rendered image.
+    \item \textbf{Prediction Recording}: We record the clean state prediction at $t=0$ at every step. These intermediate predictions contain rich conceptual gradient information and form the basis for the subsequent contrastive loss.
+\end{enumerate}
 
+\subsubsection{Contrastive Distillation Loss.}
+Inspired by cutting-edge results in Score Distillation (e.g., VSD, CSD), we propose a \textbf{contrastive distillation loss} calculated in the $x_0$-space (image domain). Our loss function is defined as a weighted sum over a set of sampled time steps $\{t\}$:
+\begin{equation}
+\mathcal{L}_{\text{RED}} = \sum_{t} \omega(t) \left[ \| x^{src} - \hat{x}^{+}_{t \to 0} \|^2 - \| x^{src} - \hat{x}^{-}_{t \to 0} \|^2 \right]
+\end{equation}
+where $\hat{x}^{+}_{t \to 0}$ is the ideal target prediction (Conditional Prediction) from the FlowEdit target branch using positive guidance ($+s$), acting as an ``attractor''. $\hat{x}^{-}_{t \to 0}$ is the unconditional prediction from the target branch, acting as a ``repeller''. $\omega(t)$ is a time-step weighting function with adaptive gradient normalization: $\omega(t) = 1 / (\| x^{src} - \hat{x}^{+}_{t \to 0} \|_1 + \epsilon)$.
 
-\subsection{Paper Length}
-Papers submitted for review must be complete. 
-The length should match that intended for final publication. 
-Papers accepted for the conference will be allocated 14 pages (plus additional pages for references) in the proceedings. 
-Note that the allocated 14 pages do not include the references. 
-The reason for this policy is that we do not want authors to omit references for sake of space limitations.
+\subsection{Differentiable Rollout \& Optimization}
 
-Papers with more than 14 pages (excluding references) will be rejected without review.
-This includes papers where the margins and formatting including the font are deemed to have been significantly altered from those laid down by this style guide.
+To achieve end-to-end On-Policy optimization, we construct a fully differentiable generation pipeline. Specifically, given a conditional input, the model first generates a discrete coarse structure (Dense Structure), which remains frozen during training. Subsequently, the flow matching model performs a \textbf{sparse feature rollout} guided by the coarse structure to generate fine-grained 3D latent features $z_0$.
 
-The reason such papers will not be reviewed is that there is no provision for supervised revisions of manuscripts. 
-The reviewing process cannot determine the suitability of the paper for presentation in 14 pages if it is reviewed in 16.
+During training, we use a differentiable ODE solver (e.g., Euler Step) to discretize the flow matching integration process:
+\begin{equation}
+z_{t_{i-1}} = z_{t_i} - (t_i - t_{i-1}) \cdot v_\theta(z_{t_i}, t_i)
+\end{equation}
+Crucially, we retain the computation graph at every step. Thus, the final generated $z_0$ is a composite function of all velocity field predictions along the entire trajectory:
+\begin{equation}
+z_0 = \text{Solver}(z_T, \{v_\theta(\cdot, t_i)\}_{i=N}^1)
+\end{equation}
+Finally, the decoder maps $z_0$ to an explicit 3D representation, which is projected to 2D images via $\mathcal{R}$. This allows supervision signals from the 2D editor to backpropagate through the renderer, decoder, and along the ODE solver's computation graph via \textbf{Backpropagation through the Trajectory}, enabling end-to-end optimization of the entire generation trajectory.
 
+\subsection{3D Regularization via $z_0$-Prediction}
 
-\subsection{Paper ID}
-It is imperative that the paper ID is mentioned on each page of the manuscript of the review version.
-Enter your paper ID in the appropriate place in the \LaTeX{} template (see \texttt{\%TODO REVIEW}).
-The paper ID is a number automatically assigned to your submission when registering your paper submission on the submission site.
+Relying solely on 2D editing signals for 3D optimization is ill-posed. To prevent geometric degradation, we introduce 3D regularization based on $z_0$ prediction:
+\begin{equation}
+\mathcal{L}_{z_0} = \mathbb{E}_{t \sim [0,1]} \left[ \frac{\| \hat{z}_{0,\theta}(z_t, t) - \hat{z}_{0,frozen}(z_t, t) \|^2}{t^2 + \epsilon} \right]
+\end{equation}
+where $\hat{z}_{0}(z_t, t) = z_t - t \cdot v(z_t, t)$ is the $z_0$ estimate derived from the Flow Matching formula. This design ensures \textbf{temporal consistency} and \textbf{geometry awareness}, effectively preserving the geometric topology priors contained in the pre-trained model.
 
-
-\subsection{Line Numbering}
-\label{sec:line-numbering}
-All lines should be numbered in the initial submission, as in this example document. 
-This makes reviewing more efficient, because reviewers can refer to a line on a page. 
-Line numbering is removed in the camera-ready version.
-
-
-\section{Policies}
-The policies governing the review process of ECCV \ECCVyear{} are detailed on the conference webpage (see \url{ https://eccv.ecva.net/Conferences/2026/SubmissionPolicies}), such as regarding confidentiality, dual submissions, double-blind reviewing, plagiarism, and more. 
-By submitting a paper to ECCV, the authors acknowledge that they have read the submission policies and that the submission follows the rules set forth.
-
-Accepted papers will be published in LNCS proceedings with Springer.
-To that end, authors must follow the Springer Nature Code of Conduct for Authors (see \url{https://www.springernature.com/gp/authors/book-authors-code-of-conduct}).
-We would like to draw particular attention to the policies regarding figures and illustrations, as well as ethical approval and informed consent, which are also reproduced on the ECCV website.
-
-
-\section{Preserving Anonymity}
-\label{sec:blind}
-ECCV reviewing is double blind, in that authors do not know the names of the area chair/reviewers of their papers, and the area chairs/reviewers cannot, beyond reasonable doubt, infer the names of the authors from the submission and the additional material. 
-You must not identify the authors nor provide links to websites that identify the authors, neither in the paper nor in the supplemental material.
-If you need to cite a different paper of yours that is being submitted concurrently to ECCV, you should \emph{(1)} cite these papers anonymously, \emph{(2)} argue in the body of your paper why your ECCV paper is non-trivially different from these concurrent submissions, and \emph{(3)} include anonymized versions of those papers in the supplemental material.
-Violation of any of these guidelines may lead to rejection without review. 
-
-Many authors misunderstand the concept of anonymizing for blind review.
-Blind review does not mean that one must remove citations to one's own work---in fact it is often impossible to review a paper unless the previous citations are known and available.
-
-Blind review means that you do not use the words ``my'' or ``our'' when citing previous work.
-That is all.
-(But see below for tech reports.)
-
-Saying ``this builds on the work of Lucy Smith [1]'' does not say that you are Lucy Smith;
-it says that you are building on her work.
-If you are Smith and Jones, do not say ``as we show in [7]'', say ``as Smith and Jones show in [7]'' and at the end of the paper, include reference 7 as you would any other cited work.
-
-An example of a bad paper just asking to be rejected:
-\begin{quote}
-  \begin{center}
-      An analysis of the frobnicatable foo filter.
-  \end{center}
-
-   In this paper we present a performance analysis of our previous paper [1], and show it to be inferior to all previously known methods.
-   Why the previous paper was accepted without this analysis is beyond me.
-
-   [1] Removed for blind review
-\end{quote}
-
-An example of an acceptable paper:
-\begin{quote}
-  \begin{center}
-     An analysis of the frobnicatable foo filter.
-  \end{center}
-
-   In this paper we present a performance analysis of the  paper of Smith \etal [1], and show it to be inferior to all previously known methods.
-   Why the previous paper was accepted without this analysis is beyond me.
-
-   [1] Smith, L and Jones, C. ``The frobnicatable foo filter, a fundamental contribution to human knowledge''. Nature 381(12), 1-213.
-\end{quote}
-
-If you are making a submission to another conference at the same time, which covers similar or overlapping material, you may need to refer to that submission in order to explain the differences, just as you would if you had previously published related work.
-In such cases, include the anonymized parallel submission [1] as supplemental material and cite it as
-\begin{quote}
-  [1] Authors. ``The frobnicatable foo filter'', ECCV \ECCVyear Submission ID 00324, Supplied as supplemental material {\tt 00324.pdf}.
-\end{quote}
-
-Finally, you may feel you need to tell the reader that more details can be found elsewhere, and refer them to a technical report.
-For conference submissions, the paper must stand on its own, and not \emph{require} the reviewer to go to a tech report for further details.
-Thus, you may say in the body of the paper ``further details may be found in~\cite{Anonymous24b}''.
-Then submit the tech report as supplemental material.
-Again, you may not assume the reviewers will read this material.
-
-Sometimes your paper is about a problem, which you tested using a tool that is widely known to be restricted to a single institution.
-For example, let's say it's 1969, you have solved a key problem on the Apollo lander, and you believe that the ECCV audience would like to hear about your
-solution.
-The work is a development of your celebrated 1968 paper entitled ``Zero-g frobnication: How being the only people in the world with access to the Apollo lander source code makes us a wow at parties'', by Zeus \etal.
-
-You can handle this paper like any other.
-Do not write ``We show how to improve our previous work [Anonymous, 1968].
-This time we tested the algorithm on a lunar lander [name of lander removed for blind review]''.
-That would be silly, and would immediately identify the authors.
-Instead write the following:
-\begin{quotation}
-   We describe a system for zero-g frobnication.
-   This system is new because it handles the following cases:
-   A, B.  Previous systems [Zeus et al. 1968] did not  handle case B properly.
-   Ours handles it by including a foo term in the bar integral.
-
-   ...
-
-   The proposed system was integrated with the Apollo lunar lander, and went all the way to the moon, don't you know.
-   It displayed the following behaviours, which show how well we solved cases A and B: ...
-\end{quotation}
-As you can see, the above text follows standard scientific convention, reads better than the first version, and does not explicitly name you as the authors.
-A reviewer might think it likely that the new paper was written by Zeus \etal, but cannot make any decision based on that guess.
-He or she would have to be sure that no other authors could have been contracted to solve problem B.
-
-For sake of anonymity, authors must omit acknowledgements in the review copy. 
-They can be added later when you prepare the final copy.
+The final total optimization objective consists of the terminal editing distillation loss and the intermediate regularization loss:
+\begin{equation}
+\mathcal{L}_{total} = \mathcal{L}_{RED}(z_0) + \lambda \mathcal{L}_{z_0}
+\end{equation}
 
 
-\section{Formatting Guidelines}
+\section{Experiments}
+\label{sec:experiments}
 
-\subsection{Headings}
-Headings should be capitalized (\ie, nouns, verbs, and all other words except articles, prepositions, and conjunctions should be set with an initial capital) and should, with the exception of the title, be aligned to the left.
-Only the first two levels of section headings should be numbered, as shown in \cref{tab:headings}.
-The respective font sizes are also given in \cref{tab:headings}. 
-Kindly refrain from using ``0'' when numbering your section headings.
-Words joined by a hyphen are subject to a special rule. 
-If the first word can stand alone, the second word should be capitalized.
+\subsection{Experimental Setup}
+
+\subsubsection{Dataset.}
+To validate the effectiveness of OREO in \textbf{3D concept design} scenarios, we constructed a specialized \textbf{Conceptual Design Dataset}.
+\begin{itemize}
+    \item \textbf{Training Set}: Contains approximately 2,000 high-quality concept design images collected from the internet, covering sci-fi vehicles, fantasy creatures, stylized characters, and futuristic architecture. These images typically feature exaggerated proportions, unique textures, and non-realistic geometric structures, posing extremely high demands on the generalization capability of 3D generators.
+    \item \textbf{Test Set}: Contains 100 unseen, highly imaginative design sketches, used to evaluate the model's ability to translate abstract ideas into 3D entities.
+\end{itemize}
+
+\subsubsection{Baselines.}
+We compare OREO with the following baseline:
+\begin{itemize}
+    \item \textbf{Trellis (Zero-shot)}: The original pre-trained Trellis model, serving as the supervised learning benchmark.
+\end{itemize}
+
+\subsubsection{Metrics.}
+We employ a combination of quantitative and qualitative evaluations:
+\begin{itemize}
+    \item \textbf{CLIP Similarity}: Measures the conceptual consistency between generated views and the input prompt.
+    \item \textbf{DINO Similarity}: Evaluates the visual feature similarity between generated results and reference images.
+    \item \textbf{User Study}: Human evaluators are invited to score the geometric quality and texture details of the generated assets.
+\end{itemize}
+
+\subsubsection{Implementation Details.}
+Our experiments are implemented based on the PyTorch framework.
+\begin{itemize}
+    \item \textbf{Model Architecture}: We use the pre-trained \textbf{Trellis-Image-Large} as the 3D generator backbone and \textbf{Qwen-Image-Edit} as the 2D editing teacher model. The renderer is Gaussian Splatting, with a rendering resolution of $1024 \times 1024$.
+    \item \textbf{Training Settings}: We use the \textbf{SGD optimizer} with a learning rate of $5 \times 10^{-3}$. Training is conducted on a single NVIDIA A800 GPU with a batch size of 1 and gradient accumulation steps of 4. To save memory, we use \textbf{BF16 mixed precision} training. The total number of training epochs is 500.
+    \item \textbf{RED Parameters}: The noise mode uses the "Aligned" strategy. Based on preliminary analysis (see Section 4.2), we fix the configuration to \textbf{(Steps: 9|12, Cfg=4)}, meaning editing starts at a noise level of $t=0.75$ with a total of 12 inference steps.
+    \item \textbf{Loss Weights}: In all experiments, we only use the \textbf{Contrastive Distillation Loss (CDL)} with a weight of 1.0, without enabling additional MSE or regularization losses.
+\end{itemize}
+
+\subsection{Preliminary Analysis: Validating the Editing Teacher}
+
+Before applying FlowEdit to the 3D optimization loop, we first evaluated its competence as a "teacher model" on an independent 2D dataset and determined the optimal editing parameters. The upper bound of 3D optimization depends on the quality of the 2D Pseudo-GT: we need to ensure that the $\Delta x$ produced by the editing process is primarily semantic correction rather than geometric destruction.
+
+We selected 50 rendered images from the test set, executed FlowEdit under different parameter configurations, and calculated CLIP Similarity (conceptual alignment), DINO Similarity (structural consistency), and Silhouette IoU (contour overlap). Additionally, we compared FlowEdit with other mainstream image editing methods. Table \ref{tab:flowedit_ablation} shows the detailed quantitative analysis results.
 
 \begin{table}[tb]
-  \caption{Font sizes of headings. 
-    Table captions should always be positioned \emph{above} the tables.
-  }
-  \label{tab:headings}
+  \caption{Sensitivity analysis of FlowEdit parameters. We report the change in metrics (Diff) and the final Mask IoU under different configurations. The gray background indicates the selected final configuration.}
+  \label{tab:flowedit_ablation}
   \centering
-  \begin{tabular}{@{}lll@{}}
+  \begin{tabular}{@{}llccc@{}}
     \toprule
-    Heading level & Example & Font size and style\\
+    Experiment & Configuration & CLIP Sim Diff$\uparrow$ & DINO Sim Diff$\uparrow$ & Mask IoU$\uparrow$ \\
     \midrule
-    Title (centered)  & {\Large\bf Lecture Notes \dots} & 14 point, bold\\
-    1st-level heading & {\large\bf 1 Introduction} & 12 point, bold\\
-    2nd-level heading & {\bf 2.1 Printing Area} & 10 point, bold\\
-    3rd-level heading & {\bf Headings.} Text follows \dots & 10 point, bold\\
-    4th-level heading & {\it Remark.} Text follows \dots & 10 point, italic\\
-  \bottomrule
+    \textbf{A. CFG Scale} & Steps: 20|40, Cfg=2 & +0.0029 & +0.0028 & 0.9887 \\
+    \textit{(Fixed Steps)} & \textbf{Steps: 20|40, Cfg=4} & \textbf{+0.0034} & \textbf{+0.0089} & \textbf{0.9786} \\
+    & Steps: 20|40, Cfg=12 & -0.0098 & +0.0051 & 0.9631 \\
+    \midrule
+    \textbf{B. Ratio (3:4 vs 2:4)} & Steps: 20|40 (Ratio 0.50) & +0.0034 & +0.0089 & 0.9786 \\
+    \textit{(Fixed Cfg=4)} & \textbf{Steps: 30|40 (Ratio 0.75)} & \textbf{+0.0228} & \textbf{+0.0226} & \textbf{0.9319} \\
+    \midrule
+    \textbf{C. Efficiency} & Steps: 30|40 (Total 40) & +0.0228 & +0.0226 & 0.9319 \\
+    \textit{(Fixed Ratio 0.75)} & \textbf{Steps: 9|12 (Total 12)} & \textbf{+0.0132} & \textbf{+0.0156} & \textbf{0.9595} \\
+    \bottomrule
   \end{tabular}
 \end{table}
 
-Here are some examples of headings: 
-``Criteria to Disprove Context-Freeness of Collage Languages'', ``On Correcting the Intrusion of Tracing Non-deterministic Programs by Software'', ``A User-Friendly and Extendable Data Distribution System'', ``Multi-flip Networks: Parallelizing GenSAT'', ``Self-determinations of Man''.
+\textbf{Analysis and Conclusion}:
+\begin{enumerate}
+    \item \textbf{Choice of Guidance Scale}: Experiments show that excessively high CFG (e.g., 12) severely damages image quality, leading to drops in both CLIP and IoU. \textbf{Cfg=4} demonstrated the most robust performance, effectively enhancing conceptual features while maintaining high geometric consistency (IoU > 0.97).
+    \item \textbf{Critical Role of Timestep Ratio}: We found that the starting point of the editing interval is more critical than the total number of steps. Comparing \textbf{Steps: 20|40 (Ratio 0.5)} and \textbf{Steps: 30|40 (Ratio 0.75)}, the latter brought nearly a \textbf{7x} improvement in CLIP (+0.0228 vs +0.0034). This indicates that at low noise levels like $t=0.5$, the image structure is solidified, and the model lacks sufficient \textbf{plasticity} to inject new concepts. Therefore, we fix the \textbf{Ratio to 0.75} to ensure sufficient editing freedom.
+    \item \textbf{Efficiency-Quality Trade-off}: Given a Ratio of 0.75, we compared high-step (30|40) and low-step (9|12) strategies. Although 30|40 yielded slightly higher conceptual improvement, its Mask IoU dropped significantly (0.93), increasing the risk of geometric drift. In contrast, \textbf{Steps: 9|12} maintained extremely high geometric stability (\textbf{IoU $\sim$0.96}) while still achieving competitive conceptual enhancement, with a \textbf{70\%} reduction in computational cost.
+\end{enumerate}
 
+Based on the above analysis, we adopt the configuration \textbf{(Steps: 9|12, Cfg=4)} in all subsequent 3D experiments.
 
-\subsection{Figures}
-\label{sect:figures}
-For \LaTeX{} users, we recommend integrating figures in your paper using the package \texttt{graphicx}.
+\subsection{Main Results}
 
-It is essential that all illustrations are clear and legible. 
-Vector graphics (rather than rasterized images) should be used for diagrams and schemas whenever possible. 
-Please check that the lines in line drawings are not interrupted and have a constant width. 
-Line drawings are to have a resolution of at least 800 dpi (preferably 1200 dpi).
-Grids and details within figures must be clearly legible and may not be written one on top of the other. 
-The lettering in figures should not use font sizes smaller than 6\:pt ($\sim$2\:mm character height). 
+We evaluated the performance of OREO and its baselines on the test set containing 100 concept design prompts.
 
-Figures should be numbered and should have a caption, which should always be positioned \emph{under} the figures, in contrast to the caption belonging to a table, which should always appear \emph{above} the table.
-Figures and Tables should be cross-referred in the text.
-
-If they are short, they are centered between the margins (\cf \cref{fig:short}). 
-Longer captions, covering more than one line, are justified (\cref{fig:example} shows an example). 
-Captions that do not constitute a full sentence, do not have a period.
-
-
-\begin{figure}[tb]
-  \centering
-  \includegraphics[height=6.5cm]{eijkel2}
-  \caption{One kernel at $x_s$ (\emph{dotted kernel}) or two kernels at $x_i$ and $x_j$ (\emph{left and right}) lead to the same summed estimate at $x_s$.
-    This shows a figure consisting of different types of lines.
-    Elements of the figure described in the caption should be set in italics, in parentheses, as shown in this sample caption. 
-    The last sentence of a figure caption should generally end with a full stop, except when the caption is not a full sentence.
-  }
-  \label{fig:example}
-\end{figure}
-
-\begin{figure}[tb]
-  \centering
-  \begin{subfigure}{0.68\linewidth}
-    \fbox{\rule{0pt}{0.5in} \rule{.9\linewidth}{0pt}}
-    \caption{An example of a subfigure}
-    \label{fig:short-a}
-  \end{subfigure}
-  \hfill
-  \begin{subfigure}{0.28\linewidth}
-    \fbox{\rule{0pt}{0.5in} \rule{.9\linewidth}{0pt}}
-    \caption{Another example of a subfigure}
-    \label{fig:short-b}
-  \end{subfigure}
-  \caption{Centered, short example caption}
-  \label{fig:short}
-\end{figure}
-
-If possible (\eg, if you use \LaTeX) please define figures as floating objects. 
-\LaTeX{} users, please avoid using the location parameter ``h'' for ``here''. 
-If you have to insert a pagebreak before a figure, please ensure that the previous page is completely filled.
-
-
-\subsection{Formulas}
-Displayed equations or formulas are centered and set on a separate line (with an extra line or half line space above and below). 
-Equations should be numbered for reference. 
-The numbers should be consecutive within the contribution, with numbers enclosed in parentheses and set on the right margin.
-For example,
-\begin{align}
-  \psi (u) & = \int_{0}^{T} \left[\frac{1}{2}
-  \left(\Lambda_{0}^{-1} u,u\right) + N^{\ast} (-u)\right] \text{d}t \; \\
-& = 0
-\end{align}
-and 
-\begin{equation}
-  E = m\cdot c^2.
-  \label{eq:important}
-\end{equation}
-Please do not include section counters in the numbering.
-
-Numbering equations makes reviewing more efficient, because reviewers can refer to a line on a page.  
-It is important for readers to be able to refer to any particular equation.
-Just because you did not refer to it in the text does not mean some future reader might not need to refer to it.
-It is cumbersome to have to use circumlocutions like ``the equation second from the top of page 3''.
-(Note that the ruler will not be present in the final copy, so is not an alternative to equation numbers).
-All authors will benefit from reading Mermin's description of how to write mathematics:
-\url{https://doi.org/10.1063/1.2811173}.
-
-% No color equations in Springer publications.
-Equations should never be in color and should be punctuated in the same way as ordinary text.
-They should not be pasted in as figures.
-
-
-\subsubsection{Lemmas, Propositions, and Theorems.}
-The numbers accorded to lemmas, propositions, and theorems, \etc should appear in consecutive order, starting with Lemma 1. 
-Please do not include section counters in the numbering like ``Theorem 1.1''.
-
-
-\subsection{Footnotes.}
-The superscript numeral used to refer to a footnote appears in the text either directly after the word to be discussed or -- in relation to a phrase or a sentence -- following the punctuation mark (comma, semicolon, or period).%
-\footnote{The footnote numeral is set flush left and the text follows with the usual word spacing. 
-  Second and subsequent lines are indented. 
-}
-For remarks pertaining to the title or the authors' names, in the header of a paper, symbols should be used instead of a number.
-Please note that no footnotes may be included in the abstract.
-
-
-\subsection{Cross References}
-For the benefit of author(s) and readers, please use the
-\begin{verbatim}
-  \cref{...}
-\end{verbatim}
-command for cross-referencing to figures, tables, equations, or sections.
-This will automatically insert the appropriate label alongside the cross reference as in this example:
-\begin{quotation}
-  To see how our method outperforms previous work, please see \cref{fig:example} and \cref{tab:headings}.
-  It is also possible to refer to multiple targets as once, \eg~to \cref{fig:example,fig:short-a}.
-  You may also return to \cref{sec:intro} or look at \cref{eq:important}.
-\end{quotation}
-If you do not wish to abbreviate the label, for example at the beginning of the sentence, you can use the
-\begin{verbatim}
-  \Cref{...}
-\end{verbatim}
-command. Here is an example:
-\begin{quotation}
-  \Cref{fig:example} is also quite important.
-\end{quotation}
-
-
-\subsection{Program Code}
-Program listings or program commands in the text are normally set in typewriter font (\eg, \texttt{printf("Hello world!\textbackslash{}n");}).
-
-
-\subsection{Citations}
-Arabic numbers are used for citation, which is sequential either by order of citation or by alphabetical order of the references, depending on which sequence is used in the list of references. 
-The reference numbers are given in brackets and are not superscript.
-Please observe the following guidelines:
+\subsubsection{Quantitative Evaluation.}
+Table [Table 1] shows the scores of each method on CLIP Similarity and DINO Similarity.
 \begin{itemize}
-\item Single citation: \cite{Anonymous24}
-\item Multiple citation: \cite{Alpher02,Alpher03,Alpher05,Anonymous24b,Anonymous24}. 
-  The numbers should be listed in numerical order.
-  If you use the template as advised, this will be taken care of automatically.
-\item If an author's name is used in the text: Alpher \cite{Alpher02} was the first \ldots
-\end{itemize}
-Please write all references using the Latin alphabet. If the title of the book you are referring to is, \eg, in Russian or Chinese, then please write (in Russian) or (in Chinese) at the end of the transcript or translation of the title.
-All references cited in the text should be in the list of references and vice versa.
-
-References should be formatted with the official LNCS reference style.
-The \LaTeX{} template already takes care of that through the use of the \texttt{splncs04.bst} Bib\TeX{} style file.
-Springer strongly encourages you to include DOIs (Digital Object Identifiers) in your references (\cf \cite{ECCV2022}). 
-The DOI is a unique code allotted by the publisher to each online paper or journal article. 
-It provides a stable way of finding published papers and their metadata. 
-The insertion of DOIs increases the overall length of the references section, but this should not concern you as the reference section is not counted toward the page limit.
-
-
-\subsection{Miscellaneous}
-Compare the following:
-\begin{center}
-  \begin{tabular}{ll}
-    \verb'$conf_a$'          & $\qquad conf_a$ \\
-    \verb'$\mathit{conf}_a$' & $\qquad \mathit{conf}_a$
-  \end{tabular}
-\end{center}
-See The \TeX book, p.\ 165.
-
-The space after \eg, meaning ``for example'', should not be a sentence-ending space.
-So \eg is correct, \emph{e.g.} is not.
-The provided \verb'\eg' macro takes care of this.
-
-When citing a multi-author paper, you may save space by using ``et alia'', 
-shortened to ``\etal'' (not ``{\em et.\ al.}'' as ``{\em et\hskip 0.1em}'' is a complete word).
-If you use the \verb'\etal' macro provided, then you need not worry about double periods when used at the end of a sentence as in Alpher \etal.
-However, use it only when there are three or more authors.
-Thus, the following is correct:
-   ``Frobnication has been trendy lately.
-   It was introduced by Alpher~\cite{Alpher02}, and subsequently developed by
-   Alpher and Fotheringham-Smythe~\cite{Alpher03}, and Alpher \etal~\cite{Alpher04}.''
-
-This is incorrect: ``... subsequently developed by Alpher \etal~\cite{Alpher03} ...'' because reference~\cite{Alpher03} has just two authors.
-
-
-\subsection{Most Frequently Encountered Issues}
-Please kindly use the checklist below to deal with some of the most frequently encountered issues in the latex files of ECCV submissions.
-
-\begin{itemize}
-\item I have removed all \verb| \vspace| and \verb|\hspace|  commands from my paper.
-\item I have not used \verb|\cite| command in the abstract.
-\item I have entered a correct \verb|\titlerunning{}| command and selected a meaningful short name for the paper.
-\item I have used the same name spelling in all my papers accepted to ECCV and ECCV Workshops.
-\item I have added acknowledgments without a section number, e.g. using the \verb|\section*{}| command.
-\item Excluding references and acknowledgments, my paper is no longer than 14 pages.
-\item I have not decreased the font size of any part of the paper (except tables) to fit into 14 pages, I understand Springer editors will remove such commands.
+    \item \textbf{Conceptual Alignment}: RED achieved a significant lead in CLIP Similarity, improving by about 15\% compared to the original Trellis. This indicates that our method successfully transferred the 2D editor's understanding of complex concepts to the 3D generator.
+    \item \textbf{User Preference}: User Study results show that over 85\% of users prefer the assets generated by RED in terms of geometric plausibility and texture details, especially when dealing with non-standard structures of creatures and vehicles.
 \end{itemize}
 
+\subsubsection{Qualitative Evaluation.}
+Figure [Figure Y] shows a visual comparison between RED and the baseline models.
+\begin{itemize}
+    \item \textbf{Geometric Repair}: In the case of "Cyberpunk style mechanical prosthetic limbs", the original Trellis often generated blurred structures, while RED successfully restored clear joint and pipeline details.
+    \item \textbf{Texture Enhancement}: For "Magic book with glowing runes", the textures generated by RED were not only clearer but also had lighting effects more consistent with the prompt description, eliminating the oversaturation problem common in SDS.
+    \item \textbf{Multi-view Consistency}: Although FlowEdit guides on a single view, thanks to the inherent consistency of the 3D generator, the assets generated by RED maintained structural coherence across all views, without obvious Janus problems.
+\end{itemize}
+
+\subsection{Ablation Study and Analysis}
+
+To deeply understand the contribution of each component of RED, we conducted a series of ablation experiments.
+
+\subsubsection{Analyzing Loss Components.}
+We verified the necessity of each part of the Contrastive Distillation Loss (CDL).
+\begin{itemize}
+    \item \textbf{Replace CDL with MSE}: We attempted to directly minimize the mean squared error ($\| x^{src} - x^{tgt} \|^2$) between the rendered image and the final output of FlowEdit. Results showed that although this strategy could quickly close the conceptual distance, it easily led to geometric distortion (e.g., uneven surfaces). This is because MSE forces the model to match the editing results at the pixel level, ignoring inevitable minor geometric deviations during the 2D editing process. In contrast, CDL utilizes relative gradient directions, providing more robust conceptual guidance.
+    \item \textbf{Remove Repeller Term ($\| x^{src} - \hat{x}^{-}_{t \to 0} \|^2$)}: Retaining only the attractor term led to the model overfitting the editing target, ignoring the suppression of the unconditional distribution, resulting in generated textures that were too smooth and lacked detail.
+    \item \textbf{Remove Trajectory Regularization ($\mathcal{L}_{reg}$)}: This is a key stability term. Experiments showed that without regularization, the model was prone to geometric collapse (e.g., broken surfaces or excess floating objects) in the later stages of training, proving the importance of maintaining 3D priors during the distillation process.
+\end{itemize}
+
+\subsubsection{Sampling Strategy Analysis.}
+To balance training efficiency and performance, we adopted Multi-step Time Sampling (MTS Sampling).
+\begin{itemize}
+    \item \textbf{Fixed Timestep}: If optimization is performed only at a fixed noise level (e.g., $t=500$), the model struggles to handle diverse input distributions, resulting in insufficient texture detail after convergence.
+    \item \textbf{MTS Sampling (Ours)}: To address the overfitting problem caused by fixed timesteps, we adopted a \textbf{Stratified Random Sampling} strategy. Unlike solving ODEs on a fixed discrete grid, we divide the entire time axis into continuous sub-intervals and uniformly sample a time step from each sub-interval in each iteration. This strategy ensures that the model covers continuous noise levels while maintaining the correctness of the Global Flow Trajectory, significantly enhancing robustness to minor time shifts.
+\end{itemize}
 
 \section{Conclusion}
-The paper ends with a conclusion. 
+This paper proposes \textbf{RED (Reinforced Editing Distillation)}, a general post-training framework for 3D concept design scenarios. Addressing the generalization bottleneck of existing 3D generative models when handling highly stylized and non-standard geometric inputs, we innovatively introduce an enhanced editing mechanism based on FlowEdit. By constructing a \textbf{Contrastive Distillation Loss} combined with \textbf{trajectory regularization}, RED successfully distills the rich conceptual priors contained in 2D foundation models into 3D generators. Experimental results show that our method significantly outperforms supervised baselines in conceptual consistency, geometric fidelity, and texture detail, providing an efficient new path for solving the data scarcity problem in 3D generation.
 
-\clearpage\mbox{}Page \thepage\ of the manuscript.
-\clearpage\mbox{}Page \thepage\ of the manuscript.
-\clearpage\mbox{}Page \thepage\ of the manuscript.
-\clearpage\mbox{}Page \thepage\ of the manuscript.
-\clearpage\mbox{}Page \thepage\ of the manuscript. This is the last page.
-\par\vfill\par
-Now we have reached the maximum length of an ECCV \ECCVyear{} submission (excluding references and acknowledgements).
-References should start immediately after the main text, but can continue past p.\ 14 if needed. 
-\clearpage  % TODO FINAL: This \clearpage needs to be removed from both review and camera-ready versions.
-
-\section*{Acknowledgements}
-Please insert your acknowledgments here.
-
-% ---- Bibliography ----
-%
-% BibTeX users should specify bibliography style 'splncs04'.
-% References will then be sorted and formatted in the correct style.
-%
-\bibliographystyle{splncs04}
-\bibliography{main}
-\end{document}
+\textbf{Future Work.} Although RED performs well, there is still room for further exploration. First, the current FlowEdit process has high inference costs; future work could explore more efficient distillation strategies (e.g., one-step editing). Second, we will attempt to extend RED to more complex scene generation tasks, utilizing panoramic editing models to optimize large-scale 3D environments. Finally, combining with Large Multimodal Models (LMM) for more fine-grained interactive editing is also an exciting direction.
