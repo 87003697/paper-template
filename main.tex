@@ -71,7 +71,7 @@ Third Author\inst{3}\orcidlink{2222--3333-4444-5555}}
 % First names are abbreviated in the running head.
 % If there are more than two authors, 'et al.' is used.
 
-% TODO FINAL: Replace with your institution list.
+% TODO FINAL: Replace with your institution list. 
 \institute{Princeton University, Princeton NJ 08544, USA \and
 Springer Heidelberg, Tiergartenstr.~17, 69121 Heidelberg, Germany
 \email{lncs@springer.com}\\
@@ -83,11 +83,12 @@ ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
 
 
 \begin{abstract}
-  Despite the success of 3D native generators, they often struggle to generalize to highly stylized scenarios, resulting in geometric or textual misalignment, due to the scarcity of diverse 3D training data.
+  Despite the success of 3D native generators, their generalization to highly stylized scenarios is constrained by the scarcity of diverse 3D training data. 
+  This limitation frequently results in semantic misalignment and consequent geometric or textual distortion.
   To address this challenge, we introduce \textbf{OREO}, a novel post-training paradigm that compensates for 3D data scarcity by leveraging pre-trained 2D diffusion priors within an on-policy \textit{Render-Edit-Optimize} loop.
   At the core of our framework lies the \textbf{Reinforced Editing Distillation (RED)} algorithm. 
-  RED employs an enhanced FlowEdit strategy to edit the rendered views, reinforcing target concepts in a view-preserving manner, thereby yielding geometrically consistent pseudo-ground truths. 
-  To optimize the 3D generator, these view-space signals are leveraged via a contrastive distillation loss, with the resulting gradients backpropagated through the entire generation trajectory. 
+  RED employs an enhanced FlowEdit strategy to generate corrective edits that reinforce target concepts while preserving the original viewpoint.
+  To optimize the 3D generator, these view-space signals are leveraged via a contrastive loss, with the resulting gradients backpropagated through the entire generation trajectory. 
   To prevent geometric degradation, along with the editing backpropagation, we incorporate a 3D native regularization that propagates structural constraints back to early generation steps.
   Extensive experiments demonstrate that OREO significantly outperforms supervised baselines on complex creative inputs, achieving superior conceptual alignment and geometric integrity, effectively mitigating the limitations of 3D data scarcity.
   \keywords{3D Generation \and On-Policy Distillation \and Image Editing \and Flow Matching \and Differentiable Rendering}
@@ -96,40 +97,38 @@ ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
 % NOTE: Terminology Distinction
 % - Semantic: Refers to high-level understanding, knowledge, and alignment (e.g., "semantic priors", "semantic misalignment").
 % - Concept: Refers to specific objects, attributes, or content being generated/injected (e.g., "inject target concepts", "complex concepts").
+% - Post-training Domain: Targets OOD domains (stylized/imaginative) uncovered by pre-training, bridging the gap via cross-modal transfer.
 
 \section{Introduction}
 \label{sec:intro}
 
-In recent years, 3D native generators such as Trellis and Hunyuan3D series have demonstrated remarkable capabilities in automating high-quality 3D content creation. 
-The current mainstream paradigm relies heavily on pre-training with large-scale 3D datasets; however, due to the prohibitive cost of 3D asset construction, these datasets lag far behind the 2D domain in diversity, severely limiting model generalization in non-canonical scenarios. 
-This bottleneck is particularly evident in the critical stage of 3D concept design. 
-This creative process inherently requires generating imaginative and highly stylized assets that often deviate significantly from realistic prototypes found in standard datasets.
-In such scenarios, pre-trained models often fail to generalize, resulting in distorted structures or severe semantic misalignment due to the absence of corresponding 3D prototypes in the training data.
+Recently, 3D native generators such as Trellis and Hunyuan3D series have emerged as the mainstream approach in automating high-quality 3D content creation due to their superior capabilities in producing high-fidelity geometry and detailed textures.
+However, the performance of these pre-trained models is fundamentally constrained by the available 3D datasets, which remain at the million-scale due to the prohibitive costs of asset construction. 
+Consequently, these datasets are limited in diversity, posing a significant challenge for creative applications like 3D concept design. 
+In such scenarios, the input concepts are often highly stylized or imaginative, significantly deviating from the training distribution and resulting in semantic misalignment, which manifests as geometric distortion or textual artifacts.
 
-To address this challenge, our core insight is to distill the rich semantic and general visual knowledge from pre-trained 2D diffusion models into 3D generators, thereby enabling the creation of conceptually aligned assets even in data-scarce domains. 
-Based on this philosophy, we propose the \textbf{OREO (On-Policy Rendering Editing Optimization)} framework. 
-In this context, we view the 3D generator as a \textit{policy} that dictates the trajectory from noise to 3D assets.
-Unlike traditional supervised learning that relies on static datasets (off-policy), OREO establishes an \textbf{on-policy} \textit{Render-Edit-Optimize} loop: the model is optimized directly on the views rendered from its \textit{current} generation trajectory.
-This allows the generator to receive immediate feedback on its own artifacts from the 2D teacher, effectively bridging the domain gap through self-correction rather than static imitation.
+To address this challenge, we leverage the powerful priors of pre-trained 2D diffusion models, which benefit from training on billion-scale image datasets. 
+Such extensive training equips them with robust semantic understanding and superior capabilities in generating imaginative structures and intricate details, far surpassing the scope of existing million-scale 3D datasets. 
+To effectively distill these rich 2D priors into 3D generators, we propose the \textbf{On-Policy Rendering Editing Optimization (OREO)} framework. 
+The core idea is to establish an on-policy optimization mechanism: instead of learning from static datasets, the generator receives immediate feedback on its own artifacts from a 2D teacher. 
+Specifically, OREO implements a \textit{Render-Edit-Optimize} loop. 
+In this process, the model renders views from its current rollout, receives corrective edits from the 2D teacher, and uses these dynamic targets for model updates.
 
-At the heart of this loop is the \textbf{Reinforced Editing Distillation (RED)} algorithm, which provides high-quality supervision signals to the 3D model through two synergistic steps: ``editing'' and ``distillation''. 
-First, we treat the rendered image as a ``state sample'' of the student model under the current policy and utilize a pre-trained 2D editing model as a ``teacher'' to provide immediate corrections. 
-To ensure the reliability of the correction signals, we introduce an improved FlowEdit strategy to generate geometrically consistent pseudo-ground truths. 
-This strategy injects target concepts into the rendered view while preserving the original viewpoint, thereby providing the 3D model with dense and geometry-aware pixel-level supervision signals. 
-Subsequently, to stably distill these signals into the 3D generative model, we further propose a Contrastive Distillation Loss. This loss function achieves low-variance gradient updates by constructing positive and negative sample pairs.
-
-To achieve closed-loop optimization of this cycle, OREO is built upon a BPTT-based architecture. 
-We utilize a Differentiable Rollout mechanism to implement end-to-end Backpropagation through the Trajectory. 
-First, this allows the editing guidance calculated at the terminal state to be backpropagated to every step of the generation process, enabling fine-grained control over the entire trajectory. 
-Second, thanks to Backpropagation through the Trajectory, we are able to introduce more potent 3D Native Regularization. 
-Geometric constraints from later steps can influence parameter updates in earlier steps via gradient backpropagation, effectively preventing geometric degradation caused by aggressive editing and significantly improving the conceptual fidelity and multi-view consistency of the generated assets.
+At the core of this loop is the \textbf{Reinforced Editing Distillation (RED)} algorithm, which generates corrective guidance through the sequential steps of \textit{view editing} and \textit{gradient distillation}. 
+Specifically, for view editing, we employ an improved FlowEdit strategy to generate corrective edits. 
+This process reinforces target concepts in a view-preserving manner, yielding view-consistent refined targets. 
+Subsequently, to stably distill these signals, we propose a \textbf{contrastive loss} that leverages these targets to construct positive and negative sample pairs, achieving stable gradient updates. 
+To optimize the 3D generator, OREO backpropagates the editing gradients calculated at the terminal state to every intermediate step of the entire generation trajectory.  
+Furthermore, along with the editing backpropagation, we incorporate a 3D native regularization that propagates structural constraints back to early generation steps, effectively preventing geometric degradation caused by aggressive view-space editing.
 
 In summary, our contributions are primarily threefold:
 \begin{enumerate}
-    \item We pioneer a novel post-training paradigm for 3D generative models, \textbf{OREO}. 
-    Addressing the generalization bottleneck of pre-trained models in highly stylized and non-canonical scenarios, OREO effectively resolves the issue of insufficient training data diversity by constructing a \textit{Render-Edit-Optimize} closed-loop mechanism.
-    \item We propose the \textbf{Reinforced Editing Distillation (RED)} algorithm combined with a fully differentiable optimization mechanism. 
-    The former utilizes FlowEdit and Contrastive Distillation Loss to provide high-quality geometry-aware guidance, while the latter ensures optimization stability and geometric integrity through BPTT and 3D Native Regularization.
+    \item We introduce OREO, a novel post-training paradigm for 3D native generators via feedback from pre-trained 2D diffusion priors. 
+    By establishing an on-policy Render-Edit-Optimize loop, it effectively compensates for 3D data scarcity, enabling robust generalization to highly stylized and imaginative concepts.
+    \item To construct feedback from 2D priors, we propose the Reinforced Editing Distillation (RED) algorithm. 
+    It generates corrective guidance by editing rendered views with an improved FlowEdit strategy and distilling these corrections into stable gradients via a contrastive loss."
+    \item We implement an optimization mechanism that propagates editing guidance to all intermediate steps. 
+    This mechanism further enables 3D native regularization, allowing structural constraints from each step to influence all previous stages, thereby preventing structural degradation.
     \item We validate the effectiveness of our method on mainstream 3D generative models such as Trellis. 
     Experimental results show that OREO significantly enhances the model's generalization capability on complex creative inputs, surpassing supervised baselines in both conceptual alignment and geometric fidelity.
 \end{enumerate}
@@ -322,3 +321,5 @@ To balance training efficiency and performance, we adopted Multi-step Time Sampl
 This paper proposes \textbf{RED (Reinforced Editing Distillation)}, a general post-training framework for 3D concept design scenarios. Addressing the generalization bottleneck of existing 3D generative models when handling highly stylized and non-standard geometric inputs, we innovatively introduce an enhanced editing mechanism based on FlowEdit. By constructing a \textbf{Contrastive Distillation Loss} combined with \textbf{trajectory regularization}, RED successfully distills the rich conceptual priors contained in 2D foundation models into 3D generators. Experimental results show that our method significantly outperforms supervised baselines in conceptual consistency, geometric fidelity, and texture detail, providing an efficient new path for solving the data scarcity problem in 3D generation.
 
 \textbf{Future Work.} Although RED performs well, there is still room for further exploration. First, the current FlowEdit process has high inference costs; future work could explore more efficient distillation strategies (e.g., one-step editing). Second, we will attempt to extend RED to more complex scene generation tasks, utilizing panoramic editing models to optimize large-scale 3D environments. Finally, combining with Large Multimodal Models (LMM) for more fine-grained interactive editing is also an exciting direction.
+
+\end{document}
