@@ -83,15 +83,14 @@ ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
 
 
 \begin{abstract}
-  Despite the success of 3D native generators, their generalization to highly stylized scenarios is constrained by the scarcity of diverse 3D training data. 
-  This limitation frequently results in semantic misalignment and consequent geometric or textual distortion.
-  To address this challenge, we introduce \textbf{OREO}, a novel post-training paradigm that compensates for 3D data scarcity by leveraging pre-trained 2D diffusion priors within an on-policy \textit{Render-Edit-Optimize} loop.
-  At the core of our framework lies the \textbf{Reinforced Editing Distillation (RED)} algorithm. 
+  While 3D native generators have shown impressive results, they often produce semantically misaligned outputs in imaginative or stylized scenarios, resulting in geometric distortion or textual artifacts.
+  To overcome this limitation, we propose \textbf{OREO}, which leverages pre-trained 2D diffusion priors to post-train 3D generators through an on-policy \textit{Render-Edit-Optimize} loop.
+  At the core of OREO, the 2D prior is integrated through our \textbf{Reinforced Editing Distillation (RED)} algorithm. 
   RED employs an enhanced FlowEdit strategy to generate corrective edits that reinforce target concepts while preserving the original viewpoint.
-  To optimize the 3D generator, these view-space signals are leveraged via a contrastive loss, with the resulting gradients backpropagated through the entire generation trajectory. 
-  To prevent geometric degradation, along with the editing backpropagation, we incorporate a 3D native regularization that propagates structural constraints back to early generation steps.
-  Extensive experiments demonstrate that OREO significantly outperforms supervised baselines on complex creative inputs, achieving superior conceptual alignment and geometric integrity, effectively mitigating the limitations of 3D data scarcity.
-  \keywords{3D Generation \and On-Policy Distillation \and Image Editing \and Flow Matching \and Differentiable Rendering}
+  To optimize the 3D generator, we leverage a contrastive loss for stable gradient updates, which are then backpropagated to every intermediate step of the trajectory. 
+  Furthermore, we introduce a 3D native regularization that allows structural constraints from each step to influence all previous stages, effectively preventing geometric degradation.
+  Extensive experiments on mainstream baselines, including Trellis and Trellis2, demonstrate that OREO significantly enhances their generalization capabilities on complex creative inputs.
+  \keywords{3D Generation \and On-Policy Distillation \and Image Editing}
 \end{abstract}
 
 % NOTE: Terminology Distinction
@@ -119,93 +118,98 @@ Specifically, for view editing, we employ an improved FlowEdit strategy to gener
 This process reinforces target concepts in a view-preserving manner, yielding view-consistent refined targets. 
 Subsequently, to stably distill these signals, we propose a \textbf{contrastive loss} that leverages these targets to construct positive and negative sample pairs, achieving stable gradient updates. 
 To optimize the 3D generator, OREO backpropagates the editing gradients calculated at the terminal state to every intermediate step of the entire generation trajectory.  
-Furthermore, along with the editing backpropagation, we incorporate a 3D native regularization that propagates structural constraints back to early generation steps, effectively preventing geometric degradation caused by aggressive view-space editing.
+Furthermore, along with the editing backpropagation, we incorporate a 3D native regularization that propagates structural constraints back to early generation steps, effectively preventing geometric degradation caused by aggressive view-space editing. 
+Extensive experiments on mainstream baselines, including Trellis and Trellis2, demonstrate that OREO significantly enhances their generalization capabilities on complex creative inputs.
 
-In summary, our contributions are primarily threefold:
+In summary, our contributions are as follows:
 \begin{enumerate}
     \item We introduce OREO, a novel post-training paradigm for 3D native generators via feedback from pre-trained 2D diffusion priors. 
     By establishing an on-policy Render-Edit-Optimize loop, it effectively compensates for 3D data scarcity, enabling robust generalization to highly stylized and imaginative concepts.
     \item To construct feedback from 2D priors, we propose the Reinforced Editing Distillation (RED) algorithm. 
-    It generates corrective guidance by editing rendered views with an improved FlowEdit strategy and distilling these corrections into stable gradients via a contrastive loss."
+    It generates corrective guidance by editing rendered views with an improved FlowEdit strategy and distilling these corrections into stable gradients via a contrastive loss.
     \item We implement an optimization mechanism that propagates editing guidance to all intermediate steps. 
     This mechanism further enables 3D native regularization, allowing structural constraints from each step to influence all previous stages, thereby preventing structural degradation.
-    \item We validate the effectiveness of our method on mainstream 3D generative models such as Trellis. 
-    Experimental results show that OREO significantly enhances the model's generalization capability on complex creative inputs, surpassing supervised baselines in both conceptual alignment and geometric fidelity.
+    \item We validate the effectiveness of OREO on mainstream baselines, including Trellis and Trellis2. Results show that our method significantly outperforms supervised baselines in both conceptual alignment and geometric fidelity on complex creative inputs
 \end{enumerate}
 
 \section{Method}
 \label{sec:method}
 
 \subsection{Preliminaries}
+\label{sec:preliminaries}
 
-\subsubsection{On-Policy Distillation for 3D Generation.}
-We formalize the post-training of 3D generative models as an On-Policy Distillation problem. Given a student model (3D Generator) parameterized by $\theta$, the goal is to learn the distribution $p_{teacher}$ of a teacher model (2D Editor). Unlike offline distillation which relies on a fixed dataset $D = \{(x, y)\}$, On-Policy Distillation requires the student model to learn from trajectories $x \sim \pi_\theta$ generated by itself. This is achieved by minimizing the following divergence:
+\subsubsection{Problem Formulation.}
+We consider a conditional 3D generative model based on Flow Matching, parameterized by a velocity field $v_\theta$ and a decoder $\mathcal{D}$. 
+Following the mainstream Image-to-3D paradigm, the model takes a reference image $x^{ref}$ as conditioning input. 
+The generation process is modeled as a conditional ODE integration over a time horizon $t \in [0, 1]$, mapping a prior noise distribution $z_1 \sim \mathcal{N}(0, I)$ to the latent data distribution $z_0$:
 \begin{equation}
-\mathbb{E}_{x \sim \pi_\theta} [ \mathcal{L}(x, \text{Teacher}(x)) ]
+dz_t = v_\theta(z_t; t, x^{ref}) dt
 \end{equation}
-This paradigm ensures that the model can correct geometric deviations generated during its own inference process in real-time, which is crucial for improving generation quality in highly stylized and non-canonical scenarios.
-
-\subsubsection{3D Native Generation via Flow Matching.}
-Our goal is to optimize a 3D generative model $\mathcal{G}_\theta$ that has already been pre-trained on large-scale data. Unlike optimization methods initialized from scratch (e.g., DreamFusion), we leverage the pre-trained model as a strong geometric prior. Such models are typically based on the Flow Matching framework, where the generation process is modeled as an ODE integration from a prior distribution $z_T \sim \mathcal{N}(0, I)$ to the data distribution $z_0$:
+where $v_\theta$ is the conditional velocity field. We denote the entire ODE integration process as $G_\theta$, such that $z_0 = G_\theta(z_1, x^{ref})$.
+For cascaded models (e.g., Trellis), we omit intermediate representations from our formulation for clarity.
+Subsequently, the decoder $\mathcal{D}$ maps the latent code $z_0$ to an explicit 3D asset $A = \mathcal{D}(z_0)$ (e.g., Gaussian Splats). 
+This asset $A$ can be projected into 2D images $x = \mathcal{P}(A, \pi)$ via a differentiable renderer $\mathcal{P}$ under arbitrary camera poses $\pi$. 
+Our objective is to optimize the parameters $\theta$ on a dataset $\mathcal{S}$ containing highly imaginative and stylized images without corresponding ground-truth 3D assets. 
+This is challenging due to the misalignment caused by the domain gap between $\mathcal{S}$ and the pre-training data, compounded by the lack of 3D ground truth. 
+Therefore, we seek to obtain $\theta^*$ by minimizing the divergence $\mathcal{L}$ between the generated distribution and the target distribution conditioned on $x^{ref}$:
 \begin{equation}
-dz_t = v_\theta(z_t, t) dt
+\theta^* = \arg\min_\theta \mathbb{E}_{x^{ref} \sim \mathcal{S}, z_1 \sim \mathcal{N}(0,I), \pi, x=\mathcal{P}(\mathcal{D}(G_\theta(z_1, x^{ref})), \pi)} [\mathcal{L}(x, x^{ref})]
 \end{equation}
-where $v_\theta$ is the velocity field predicted by the network. Given the current state $z_t$ and velocity $v_\theta$, we can derive an estimate of the final data $z_0$: $\hat{z}_0 = z_t - t \cdot v_\theta(z_t, t)$. Subsequently, a decoder converts $z_0$ into an explicit 3D asset (e.g., Gaussian Splats), which is then projected into 2D views via a differentiable renderer $\mathcal{R}$.
+In our framework, we instantiate $\mathcal{L}$ by treating the rendered views $x$ as source images $x^{src}$ and constructing corrective targets $x^{tgt}$ via a 2D editor guided by $x^{ref}$, as detailed in the following sections.
 
-\subsubsection{Instruction-based Image Editing.}
-The task of image editing is to transform a source image $x^{src}$ into a target image $x^{tgt}$ that conforms to a text instruction $y$, while preserving the original structure unrelated to the instruction. Formally, we seek a mapping $\mathcal{E}: (x^{src}, y) \to x^{tgt}$. In the OREO framework, this mapping $\mathcal{E}$ acts as a ``teacher'', providing pseudo-ground truths of ``what should be generated'' to the 3D model.
+\subsubsection{2D Priors for Structure-Preserving Editing.}
+We leverage a pre-trained image editor (parameterized by $v_\phi$) to provide semantic feedback, transforming a source image $x^{src}$ into a target image $x^{tgt}$ aligned with a text instruction $y$, as is standard in mainstream foundation models.
+Crucially, for 3D consistency, $\mathcal{E}$ must preserve the geometric structure of $x^{src}$. To achieve this, we implement $\mathcal{E}$ using the FlowEdit algorithm, which leverages the deterministic nature of Probability Flow ODEs. Specifically, it couples the source and target generation trajectories by applying the source flow difference to the target flow:
+\begin{equation}
+z_{t-\Delta t}^{tgt} = z_t^{tgt} + (v_\phi(z_t^{tgt}, t, c_{tgt}) - v_\phi(z_t^{src}, t, c_{src})) \Delta t
+\end{equation}
+This mechanism ensures that the editing process modifies semantics $c_{tgt}$ while maintaining the underlying layout of $x^{src}$, making it an ideal candidate for our 2D teacher. We denote this entire editing process as $\mathcal{E}_\phi$, such that $x^{tgt} = \mathcal{E}_\phi(x^{src}, y)$.
 
-\subsubsection{Why FlowEdit Algorithm?}
-In the OREO framework, we employ the \textbf{FlowEdit algorithm} to guide the inference process of the base editing model. Compared to default inference modes (e.g., direct sampling), FlowEdit offers unique advantages:
+\subsection{Overview of OREO Framework}
+\label{sec:overview}
+To bridge the gap between limited 3D data and open-world creativity, we propose OREO, an On-Policy Rendering-Editing-Optimization framework. As illustrated in Figure~\ref{fig:overview}, OREO establishes a closed-loop feedback mechanism:
+\begin{itemize}
+    \item \textbf{Render}: The 3D generator produces a 3D asset from a given prompt, which is rendered into multiple 2D views.
+    \item \textbf{Edit}: A 2D teacher model edits these views to correct semantic misalignments while preserving the original viewpoint, generating "pseudo-ground truth" targets.
+    \item \textbf{Optimize}: The difference between the rendered views and the edited targets is distilled into gradients via a contrastive loss, which are then backpropagated to update the 3D generator.
+\end{itemize}
+Unlike standard Score Distillation Sampling (SDS) which relies on noisy gradients from a frozen teacher, OREO explicitly constructs high-quality target images, enabling more stable and interpretable optimization.
+
+\subsection{Reinforced Editing Distillation (RED)}
+\label{sec:red}
+The core of OREO is the Reinforced Editing Distillation (RED) algorithm, which generates robust supervision signals from the 2D teacher.
+
+\subsubsection{View-Consistent Corrective Editing.}
+We employ an improved \textbf{FlowEdit} strategy to generate corrective edits. Standard image editing often alters the viewpoint or geometry of the object, leading to inconsistencies when used as 3D supervision. To address this, our enhanced FlowEdit introduces:
 \begin{enumerate}
-    \item \textbf{View Locking}: FlowEdit utilizes the parallelogram principle of flow matching to construct a target trajectory parallel to the source trajectory in the latent space. This mechanism implicitly imposes strong geometric constraints, ensuring that editing operations only modify texture and details (Identity) without altering the object's pose or silhouette (Geometry). In contrast, SDE-based methods tend to introduce random viewpoint shifts, leading to divergence in 3D optimization.
-    \item \textbf{Training-free \& Generalization}: FlowEdit does not require fine-tuning on specific datasets and can directly leverage the powerful priors of pre-trained Diffusion/Flow models, perfectly aligning with our goal of handling OOD data.
-    \item \textbf{Gradient Stability}: Based on deterministic ODE sampling, FlowEdit provides lower variance gradient estimates compared to stochastic SDE sampling.
+    \item \textbf{Negative Guidance}: We use a negative guidance scale to preserve background and geometric features that should not be modified, ensuring the edit is local and semantically focused.
+    \item \textbf{Dynamic Noise Correction}: We adjust the noise level $\epsilon_t$ in real-time based on the source flow field gradient, ensuring the editing trajectory remains anchored to the manifold of the rendered image.
 \end{enumerate}
+This process yields a view-consistent target image $x_{edit}$ that reinforces the target concept without degrading the original 3D structure.
 
-\subsection{2D Guidance via Reinforced Editing Distillation}
-
-We utilize a pre-trained Flow Matching model $v_\varphi$ (Qwen-Image-Edit in this work) as the base to execute an improved version of the FlowEdit algorithm. To adapt to the 3D post-training task, we introduce three key improvements to the standard FlowEdit. \textbf{It is worth noting that the effectiveness of RED is built on the premise that the 2D editor can generate high-quality pseudo-ground truths (Pseudo-GT). We verify this in Section 4.1 through quantitative experiments, showing that the improved FlowEdit can significantly enhance conceptual consistency while effectively maintaining geometric integrity, thus qualifying for the role of a ``teacher''.}
-
-\begin{enumerate}
-    \item \textbf{Negative Guidance}: We introduce a negative guidance scale $-s$ when calculating the source flow field $v^{src}$. This forces the model to identify and preserve features in the source image that do \textbf{not} match the prompt (usually background or geometry that should not be edited), thereby enhancing the locality of the edit.
-    \item \textbf{Dynamic Noise Correction}: Standard FlowEdit assumes fixed noise $\epsilon$. However, as the source flow field changes, fixed noise leads to trajectory deviation. We introduce a dynamic correction term that adjusts $\epsilon_t$ in real-time based on the gradient of the source flow field, ensuring the source trajectory remains anchored to the manifold of the rendered image.
-    \item \textbf{Prediction Recording}: We record the clean state prediction at $t=0$ at every step. These intermediate predictions contain rich conceptual gradient information and form the basis for the subsequent contrastive loss.
-\end{enumerate}
-
-\subsubsection{Contrastive Distillation Loss.}
-Inspired by cutting-edge results in Score Distillation (e.g., VSD, CSD), we propose a \textbf{contrastive distillation loss} calculated in the $x_0$-space (image domain). Our loss function is defined as a weighted sum over a set of sampled time steps $\{t\}$:
+\subsubsection{Contrastive Gradient Distillation.}
+To distill the editing signals into stable gradients, we propose a \textbf{Contrastive Distillation Loss}. Instead of a simple MSE loss, which is sensitive to pixel-level misalignment, we construct positive and negative pairs:
 \begin{equation}
 \mathcal{L}_{\text{RED}} = \sum_{t} \omega(t) \left[ \| x^{src} - \hat{x}^{+}_{t \to 0} \|^2 - \| x^{src} - \hat{x}^{-}_{t \to 0} \|^2 \right]
 \end{equation}
-where $\hat{x}^{+}_{t \to 0}$ is the ideal target prediction (Conditional Prediction) from the FlowEdit target branch using positive guidance ($+s$), acting as an ``attractor''. $\hat{x}^{-}_{t \to 0}$ is the unconditional prediction from the target branch, acting as a ``repeller''. $\omega(t)$ is a time-step weighting function with adaptive gradient normalization: $\omega(t) = 1 / (\| x^{src} - \hat{x}^{+}_{t \to 0} \|_1 + \epsilon)$.
+where $\hat{x}^{+}_{t \to 0}$ is the conditional prediction (positive sample) from the editor, and $\hat{x}^{-}_{t \to 0}$ is the unconditional prediction (negative sample). This contrastive formulation pushes the generation towards the edited target while pulling it away from the generic unconditional distribution, resulting in sharper and more semantically aligned updates.
 
-\subsection{Differentiable Rollout \& Optimization}
+\subsection{Optimization via Trajectory Propagation}
+\label{sec:optimization}
 
-To achieve end-to-end On-Policy optimization, we construct a fully differentiable generation pipeline. Specifically, given a conditional input, the model first generates a discrete coarse structure (Dense Structure), which remains frozen during training. Subsequently, the flow matching model performs a \textbf{sparse feature rollout} guided by the coarse structure to generate fine-grained 3D latent features $z_0$.
-
-During training, we use a differentiable ODE solver (e.g., Euler Step) to discretize the flow matching integration process:
+\subsubsection{Backpropagation to Intermediate Steps.}
+OREO optimizes the 3D generator by backpropagating gradients from the final rendered image to the entire generation trajectory. Since the generation process is a discretized ODE solve:
 \begin{equation}
 z_{t_{i-1}} = z_{t_i} - (t_i - t_{i-1}) \cdot v_\theta(z_{t_i}, t_i)
 \end{equation}
-Crucially, we retain the computation graph at every step. Thus, the final generated $z_0$ is a composite function of all velocity field predictions along the entire trajectory:
-\begin{equation}
-z_0 = \text{Solver}(z_T, \{v_\theta(\cdot, t_i)\}_{i=N}^1)
-\end{equation}
-Finally, the decoder maps $z_0$ to an explicit 3D representation, which is projected to 2D images via $\mathcal{R}$. This allows supervision signals from the 2D editor to backpropagate through the renderer, decoder, and along the ODE solver's computation graph via \textbf{Backpropagation through the Trajectory}, enabling end-to-end optimization of the entire generation trajectory.
+We retain the computation graph at every step, allowing the gradients from the terminal loss $\mathcal{L}_{\text{RED}}$ to influence the velocity field predictions $v_\theta$ at all intermediate time steps $t_i$.
 
-\subsection{3D Regularization via $z_0$-Prediction}
-
-Relying solely on 2D editing signals for 3D optimization is ill-posed. To prevent geometric degradation, we introduce 3D regularization based on $z_0$ prediction:
+\subsubsection{3D Native Regularization.}
+Aggressive 2D editing can sometimes disrupt the underlying 3D geometry. To prevent geometric degradation, we introduce a 3D native regularization term:
 \begin{equation}
-\mathcal{L}_{z_0} = \mathbb{E}_{t \sim [0,1]} \left[ \frac{\| \hat{z}_{0,\theta}(z_t, t) - \hat{z}_{0,frozen}(z_t, t) \|^2}{t^2 + \epsilon} \right]
+\mathcal{L}_{reg} = \mathbb{E}_{t} \left[ \| \hat{z}_{0,\theta}(z_t, t) - \hat{z}_{0,frozen}(z_t, t) \|^2 \right]
 \end{equation}
-where $\hat{z}_{0}(z_t, t) = z_t - t \cdot v(z_t, t)$ is the $z_0$ estimate derived from the Flow Matching formula. This design ensures \textbf{temporal consistency} and \textbf{geometry awareness}, effectively preserving the geometric topology priors contained in the pre-trained model.
-
-The final total optimization objective consists of the terminal editing distillation loss and the intermediate regularization loss:
-\begin{equation}
-\mathcal{L}_{total} = \mathcal{L}_{RED}(z_0) + \lambda \mathcal{L}_{z_0}
-\end{equation}
+This term constrains the predicted $z_0$ at each step to stay close to the prediction of the frozen pre-trained model, ensuring that the optimization respects the structural priors of the original 3D generator. The final objective is $\mathcal{L}_{total} = \mathcal{L}_{RED} + \lambda \mathcal{L}_{reg}$.
 
 
 \section{Experiments}
