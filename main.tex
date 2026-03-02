@@ -233,17 +233,18 @@ which keeps the noise semantically focused and improves editing stability.
     \State $\epsilon \leftarrow \epsilon - (v_\phi(x_t^{tgt}; t, c^{ref}) - v_\phi(x_t^{tgt}; t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Eq.~\ref{eq:red_dynamic_noise}}}
     
     \Statex \texttt{// Contrastive Distillation (Sec.~\ref{sec:contrastive_distillation})}
-    \State $\mathcal{L}_{src} \leftarrow \Call{ContrastiveLoss}{x_t^{src}, x^{src}, t}$ \Comment{\texttt{Source Loss}}
-    \State $\mathcal{L}_{tgt} \leftarrow \Call{ContrastiveLoss}{x_t^{tgt}, x^{src}, t}$ \Comment{\texttt{Target Loss}}
+    \State $x^{-} \leftarrow x_t^{src} - t \cdot v_\phi(x_t^{src}; t, \emptyset)$ \Comment{\texttt{Shared Negative Anchor}}
+    \State $x^{+} \leftarrow x_t^{src} - t \cdot v_\phi^{w}(x_t^{src}; t, c^{ref})$ \Comment{\texttt{Source Positive Anchor}}
+    \State $\mathcal{L}_{src} \leftarrow \Call{ContrastiveLoss}{x^{src}, x^{+}, x^{-}}$ \Comment{\texttt{Source Loss}}
+    \State $x^{+} \leftarrow x_t^{tgt} - t \cdot v_\phi^{w}(x_t^{tgt}; t, c^{ref})$ \Comment{\texttt{Target Positive Anchor}}
+    \State $\mathcal{L}_{tgt} \leftarrow \Call{ContrastiveLoss}{x^{src}, x^{+}, x^{-}}$ \Comment{\texttt{Target Loss}}
     \State $\mathcal{L}_{\text{RED}} \leftarrow \mathcal{L}_{\text{RED}} + (\mathcal{L}_{src} + \mathcal{L}_{tgt}) / N_e$ \Comment{\texttt{Eq.~\ref{eq:red_objective}}}
 \EndFor
 \State \Return $x^{tgt} \leftarrow x^{edit}$, $\mathcal{L}_{\text{RED}}$
 \Statex
-\Procedure{ContrastiveLoss}{$x, y, t$}
-    \State $x^{+} \leftarrow x - t \cdot v_\phi^{w}(x; t, c^{ref})$ \Comment{\texttt{Positive Anchor}}
-    \State $x^{-} \leftarrow x - t \cdot v_\phi(x; t, \emptyset)$ \Comment{\texttt{Negative Anchor}}
-    \State $w_{ada} \leftarrow (\| y - x^{+} \|_1 + \eta)^{-1}$ \Comment{\texttt{Adaptive Normalization}}
-    \State \Return $w_{ada} \cdot (\| y - x^{+} \|^2 - \| y - x^{-} \|^2)$ \Comment{\texttt{Eq.~\ref{eq:contrastive_objective}}}
+\Procedure{ContrastiveLoss}{$x, x^{+}, x^{-}$}
+    \State $w_{ada} \leftarrow (\| x - x^{+} \|_1 + \eta)^{-1}$ \Comment{\texttt{Adaptive Normalization}}
+    \State \Return $w_{ada} \cdot (\| x - x^{+} \|^2 - \| x - x^{-} \|^2)$ \Comment{\texttt{Eq.~\ref{eq:contrastive_objective}}}
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
