@@ -24,6 +24,8 @@
 % Include other packages here, before hyperref.
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 
 % The "axessiblity" package can be found at: https://ctan.org/pkg/axessibility?lang=en
 \usepackage[accsupp]{axessibility}  % Improves PDF readability for those with disabilities.
@@ -133,6 +135,11 @@ In summary, our contributions are as follows:
 \section{Method}
 \label{sec:method}
 
+In this section, we present OREO, a post-training framework designed to generalize 3D native generators via on-policy optimization.
+We first introduce the task formulation in Sec.~\ref{sec:problem_formulation} and preliminaries in Sec.~\ref{sec:preliminaries}.
+We then detail our core Reinforced Editing Distillation (RED) algorithm, which consists of Reinforced Editing in Sec.~\ref{sec:reinforced_editing} and Contrastive Distillation in Sec.~\ref{sec:contrastive_distillation}.
+Finally, we describe the Optimization process via trajectory backpropagation in Sec.~\ref{sec:optimization}.
+
 \subsection{Problem Formulation}
 \label{sec:problem_formulation}
 To bridge the gap between limited 3D data and open-world creativity, we propose OREO, an On-Policy Rendering-Editing-Optimization framework. 
@@ -148,84 +155,149 @@ Our objective is to optimize $\theta$ such that the rendered views $x$ are perce
 \subsection{Preliminaries}
 \label{sec:preliminaries}
 
-\subsubsection{Flow Matching for 3D Generation and 2D Editing.}
-Flow Matching (FM) has emerged as a mainstream generative framework, demonstrating superior performance in both 2D and 3D generation tasks. It models the data distribution by learning a velocity field $v_\theta$ to transport a simple prior distribution $p_1$ (e.g., $\mathcal{N}(0, I)$) to the complex data distribution $p_0$. The generation process is defined by an Ordinary Differential Equation (ODE):
+\textbf{Flow Matching for 3D Generation and 2D Editing.}
+Flow Matching (FM) serves as a unified generative framework for both state-of-the-art 3D generation and 2D editing tasks. It defines an Ordinary Differential Equation (ODE) that transports a Gaussian prior $\mathcal{N}(0, I)$ to the data distribution $p_0$:
 \begin{equation}
 dz_t = v_\theta(z_t; t, c) dt, \quad t \in [1, 0]
 \end{equation}
 where $z_t$ represents the latent state at time $t$, and $c$ is the condition (e.g., text or image).
 To further enhance generation quality and alignment, Classifier-Free Guidance (CFG) is commonly employed. The guided velocity field $v^{cfg}$ is defined as:
 \begin{equation}
-v_\theta^{cfg}(z_t; t, c) = v_\theta(z_t; t, \emptyset) + w \cdot (v_\theta(z_t; t, c) - v_\theta(z_t; t, \emptyset))
+v_\theta^{w}(z_t; t, c) = v_\theta(z_t; t, \emptyset) + w \cdot (v_\theta(z_t; t, c) - v_\theta(z_t; t, \emptyset))
 \end{equation}
 where $v_\theta(z_t; t, c)$ and $v_\theta(z_t; t, \emptyset)$ represent the conditional and unconditional predictions, and $w$ is the guidance scale.
-Both state-of-the-art 3D generators and 2D editing priors can be formulated within this Flow Matching framework. Typically, a 3D generator $G_\theta$, parameterized by $\theta$, encapsulates the velocity field $v_\theta$ and the corresponding ODE sampling process in the 3D latent space $z$. Conversely, a 2D editor $\mathcal{E}_\phi$, parameterized by $\phi$, encapsulates the pre-trained velocity field $v_\phi$ and the editing process in the image latent space $x$, serving as the source of supervision.
+In practice, the continuous ODE is solved numerically by discretizing the time interval $[1, 0]$ into $N$ steps $\{t_i\}_{i=0}^{N}$, where $t_0=1$ and $t_{N}=0$. The latent state is updated iteratively using a solver (e.g., Euler method) with a step size $\Delta t_i = t_{i+1} - t_i$.
+Within this framework, a 3D generator $G_\theta$, parameterized by $\theta$, encapsulates the velocity field $v_\theta$ and the corresponding ODE sampling process in the 3D latent space $z$. Conversely, a 2D editor $\mathcal{E}_\phi$, parameterized by $\phi$, encapsulates the pre-trained velocity field $v_\phi$ and the editing process in the image latent space $x$, serving as the source of supervision.
 
-\subsubsection{Inversion-Free Image Editing.}
-We leverage FlowEdit, a pioneering inversion-free editing method that modifies images by coupling the source and target flow trajectories without requiring explicit noise inversion.
+\textbf{Inversion-Free Image Editing.}
+We leverage FlowEdit, an inversion-free editing method that modifies images by coupling the source and target flow trajectories without requiring explicit noise inversion.
 Starting from the source image $x^{src}$ as the initial state, the algorithm iteratively updates the editing variable $x^{edit}$ using the relative velocity field $\tilde{v}_t$:
 \begin{equation}
     x^{edit} \leftarrow x^{edit} - \tilde{v}_t \Delta t
 \end{equation}
-where $\tilde{v}_t$ is the difference between the guided target and source flows:
+where $\tilde{v}_t$ is the difference between the velocity fields of the \textbf{target branch} (guided by $c^{tgt}$) and the \textbf{source branch} (guided by $c^{src}$):
 \begin{equation}
-    \tilde{v}_t = v_\phi^{cfg}(x_t^{tgt}; t, c^{tgt}) - v_\phi^{cfg}(x_t^{src}; t, c^{src})
+    \tilde{v}_t = v_\phi^{w_{tgt}}(x_t^{tgt}; t, c^{ref}) - v_\phi^{w_{src}}(x_t^{src}; t, c^{ref})
 \end{equation}
-Here, $x_t^{src} = (1-t)x^{src} + t\epsilon$ with $\epsilon \sim \mathcal{N}(0, I)$, and $x_t^{tgt} = x^{edit} + (x_t^{src} - x^{src})$ is the target state constructed by the parallelogram rule. Additionally, $c^{src}$ and $c^{tgt}$ represent the source and target conditions, which can be text or images depending on $v_\phi$.
+Here, $x_t^{src} = (1-t)x^{src} + t\epsilon$ with $\epsilon \sim \mathcal{N}(0, I)$, and $x_t^{tgt} = x^{edit} + (x_t^{src} - x^{src})$ is the target state constructed by the parallelogram rule. 
+Additionally, $c^{src}$ and $c^{tgt}$ represent the source and target conditions, which can be text or images depending on $v_\phi$.
+The integration is performed for the last $N_{e}$ steps of the generation process (where $N_{e} \le N$), corresponding to the time interval $[t_{start}, 0]$, with a step size $\Delta t = t_{i-1} - t_i$, yielding the final target $x^{tgt}$ at $t=0$.
 Crucially, this formulation allows for direct editing without costly inversion to noise space, ensuring high efficiency and structural fidelity.
 
-\subsection{Reinforced Editing Distillation (RED)}
-\label{sec:red}
+\subsection{Reinforced Editing}
+\label{sec:reinforced_editing}
 
-\subsubsection{Overview.}
-Directly solving Eq.~\ref{eq:task} is intractable due to the lack of ground-truth. Thus, we employ a pre-trained 2D diffusion model $\mathcal{E}_\phi$ to provide approximate supervision.
+To solve the optimization problem in Eq.~\ref{eq:task}, we propose to construct the loss function $\mathcal{L}$ by leveraging a pre-trained 2D diffusion model $\mathcal{E}_\phi$ as a teacher.
+The motivation behind this proposal is that pre-trained 2D diffusion models can generate high-fidelity and diverse visual content, even for complex imaginative concepts.
+As illustrated in Fig.XXX, given a reference image $x^{ref}$ and a rendered view $x^{src} = \mathcal{P}(G_\theta(x^{ref}), \pi)$, the 2D prior can effectively refine $x^{src}$ into a target $x^{tgt}$ that is perceptually more aligned with $x^{ref}$ while preserving the original camera viewpoint.
+We implement this stage using a modified FlowEdit pipeline. Specifically, we introduce \textbf{Differential Editing with Negative Guidance} and \textbf{Dynamic Noise Correction} to ensure robust concept injection. The overall procedure is summarized in Algorithm~\ref{alg:red}.
+Conditioned on the reference image $x^{ref}$, our editing process operates through a dual-branch mechanism: a \textbf{target branch} guided by the editing instruction $c^{tgt}$ and a \textbf{source branch} guided by the original description $c^{src}$ (usually $c^{src} = c^{tgt}$ for instruction-based editing).
 
-Specifically, we treat the optimization process as a teacher-student distillation.
-We assume that the teacher $\mathcal{E}_\phi$, with its robust 2D priors, can identify perceptual misalignments in the student's renderings and provide corrective feedback.
-Formally, conditioned on the reference image $x^{ref}$, the teacher generates a refined target $x^{tgt} = \mathcal{E}_\phi(x, x^{ref})$ for any rendered view $x$.
-This target serves as a local ground-truth that aligns with the semantic content of $x^{ref}$ while preserving the view-dependent geometry of $x$.
-Consequently, we reformulate the optimization objective in Eq.~\ref{eq:task} as minimizing the discrepancy between the generator's current output and the teacher's feedback:
+\textbf{Differential Editing with Negative Guidance.} Unlike FlowEdit which contrasts two prompts, we employ a Negative Guidance strategy using the same reference condition $c$ for both branches.
+Specifically, we set symmetric guidance scales: $w_{tgt} = w$ and $w_{src} = -w$.
+The differential velocity field is then given by:
 \begin{equation}
-    \mathcal{L}(x, x^{ref}) \triangleq \text{Dist}(x, \mathcal{E}_\phi(x, x^{ref}))
+\tilde{v}_t = v_\phi^{w}(x_t^{tgt}; t, c^{ref}) - v_\phi^{-w}(x_t^{src}; t, c^{ref})
 \end{equation}
-where $\text{Dist}(\cdot, \cdot)$ is a distance metric.
+where $c^{ref}$ is a multimodal condition combining the reference image $x^{ref}$ and a text instruction (e.g., \textit{move the camera}) to guide the generation of a novel view consistent with the reference.
+Consequently, the source and target velocity fields synergistically amplify the guidance signal towards $c^{ref}$, robustly injecting target concepts while suppressing unconditional artifacts to ensure both semantic fidelity and structural preservation.
 
-To minimize this objective, OREO establishes an on-policy \textbf{Render-Edit-Optimize} loop:
-\begin{enumerate}
-    \item \textbf{Render}: Sample a view $x$ from the current policy $G_{\theta_k}$.
-    \item \textbf{Edit}: Query the teacher to obtain the target $x^{tgt} = \mathcal{E}_\phi(x, c)$.
-    \item \textbf{Optimize}: Update parameters $\theta$ to minimize $\text{Dist}(x, x^{tgt})$.
-\end{enumerate}
-This iterative process ensures that the generator is continuously refined by the teacher's guidance, effectively transferring the 2D priors into 3D consistency.
+\textbf{Dynamic Noise Correction.}
+Standard editing often drifts off the image manifold due to accumulation errors.
+To address this, we introduce a dynamic noise correction mechanism.
+Instead of using fixed noise, we iteratively update the noise $\epsilon$ by aligning it with the semantic direction of the target branch: \begin{equation}
+\epsilon \leftarrow \epsilon - (v_\phi(x_t^{tgt}; t, c^{ref}) - v_\phi(x_t^{tgt}; t, \emptyset)) \cdot (1-t)
+\end{equation}
+This ensures that the noise distribution adapts to the target concept, yielding a view-consistent target $x^{tgt}$ that is robust to artifacts.
+Crucially, during this process, we collect the intermediate predictions from both branches at each timestep $t$ to serve as the positive and negative pairs for distillation (see Algorithm~\ref{alg:red} for details).
 
-\subsubsection{Reinforced Editing for View-Consistent Guidance.}
-The first stage of our pipeline focuses on constructing reliable supervision signals. We employ a 2D teacher model to generate "pseudo-ground-truth" targets from the current rendered views.
+\begin{algorithm}[t]
+\caption{Reinforced Editing Distillation (RED)}
+\label{alg:red}
+\begin{algorithmic}[1]
+\Require Rendered view $x^{src}$, Reference condition $c^{ref}$, Editor $\mathcal{E}_\phi$, Guidance scale $w$, Editing steps $N_e$, Total steps $N$
+\Ensure Target view $x^{tgt}$, Distillation Loss $\mathcal{L}_{\text{RED}}$
+\State Initialize $x^{edit} \leftarrow x^{src}$, Sample noise $\epsilon \sim \mathcal{N}(0, I)$, $\mathcal{L}_{\text{RED}} \leftarrow 0$
+\State Select time steps $\{t_i\}_{i=0}^{N_e}$ as the last $N_e$ steps from the full schedule of $N$ steps
+\For{$i = 0$ to $N_e-1$} \Comment{\texttt{FlowEdit: Backward Euler Integration}}
+    \State $t \leftarrow t_i$, $\Delta t \leftarrow t_{i+1} - t_i$
+    \State $x_t^{src} \leftarrow (1-t)x^{src} + t\epsilon$
+    \State $x_t^{tgt} \leftarrow x^{edit} + (x_t^{src} - x^{src})$ \Comment{\texttt{FlowEdit: Parallelogram Rule}}
+    
+    \Statex \texttt{// Reinforced Editing (Sec.~\ref{sec:reinforced_editing})}
+    \State $\tilde{v}_t \leftarrow v_\phi^{w}(x_t^{tgt}; t, c^{ref}) - v_\phi^{-w}(x_t^{src}; t, c^{ref})$ \Comment{\texttt{Negative Guidance}}
+    \State $x^{edit} \leftarrow x^{edit} - \tilde{v}_t \Delta t$ \Comment{\texttt{FlowEdit: Euler Step}}
+    \State $\epsilon \leftarrow \epsilon - (v_\phi(x_t^{tgt}; t, c^{ref}) - v_\phi(x_t^{tgt}; t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Dynamic Noise Correction}}
+    
+    \Statex \texttt{// Contrastive Distillation (Sec.~\ref{sec:contrastive_distillation})}
+    \State $\mathcal{L}_{tgt} \leftarrow \Call{ContrastiveLoss}{x_t^{tgt}, x^{src}, t}$
+    \State $\mathcal{L}_{src} \leftarrow \Call{ContrastiveLoss}{x_t^{src}, x^{src}, t}$
+    \State $\mathcal{L}_{\text{RED}} \leftarrow \mathcal{L}_{\text{RED}} + (\mathcal{L}_{tgt} + \mathcal{L}_{src})$
+\EndFor
+\State \Return $x^{tgt} \leftarrow x^{edit}$, $\mathcal{L}_{\text{RED}} \leftarrow \mathcal{L}_{\text{RED}} / N_e$
+\Statex
+\Procedure{ContrastiveLoss}{$x, y, t$}
+    \State $x^{+} \leftarrow x - t \cdot v_\phi^{w}(x; t, c^{ref})$ \Comment{\texttt{Positive Target (CFG)}}
+    \State $x^{-} \leftarrow x - t \cdot v_\phi(x; t, \emptyset)$ \Comment{\texttt{Negative Target (Uncond)}}
+    \State $w_{ada} \leftarrow (\| y - x^{+} \|_1 + \eta)^{-1}$ \Comment{\texttt{Adaptive Normalization}}
+    \State \Return $w_{ada} \cdot (\| y - x^{+} \|^2 - \| y - x^{-} \|^2)$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
 
-\paragraph{Improved FlowEdit with Negative Guidance.}
-We employ an improved \textbf{FlowEdit} strategy to generate corrective edits. Standard image editing often alters the viewpoint or geometry of the object, leading to inconsistencies when used as 3D supervision. To address this, our enhanced FlowEdit introduces \textbf{Negative Guidance}. We use a negative guidance scale to preserve background and geometric features that should not be modified, ensuring the edit is local and perceptually focused. This effectively penalizes deviations from the original structure unless they contribute to the target concept.
+\subsection{Contrastive Distillation}
+\label{sec:contrastive_distillation}
 
-\paragraph{Dynamic Noise Correction.}
-To further ensure structural fidelity, we introduce \textbf{Dynamic Noise Correction}. We adjust the noise level $\epsilon_t$ in real-time based on the source flow field gradient, ensuring the editing trajectory remains anchored to the manifold of the rendered image.
-This process yields a view-consistent target image $x_{edit}$ that reinforces the target concept without degrading the original 3D structure.
-
-
-\subsubsection{Contrastive Distillation Loss.}
-Once the target images are generated, the second stage focuses on effectively updating the 3D generator using these targets.
-To distill the editing signals into stable gradients, we propose a \textbf{Contrastive Distillation Loss}. Instead of a simple MSE loss, which is sensitive to pixel-level misalignment, we construct positive and negative pairs:
+In the second stage, we aim to update the 3D generator using the editing signals.
+A naive matching loss (e.g., directly matching to edited outputs) is sensitive to view misalignment. Inspired by prior score distillation works such as DMD, we use a contrastive objective.
+At each timestep $t$, we form positive and negative targets from the editing process:
 \begin{equation}
-\mathcal{L}_{\text{RED}} = \sum_{t} \omega(t) \left[ \| x^{src} - \hat{x}^{+}_{t \to 0} \|^2 - \| x^{src} - \hat{x}^{-}_{t \to 0} \|^2 \right]
+\hat{x}^{+}_{0|t} = x_t^{tgt} - t \cdot v_\phi^{w}(x_t^{tgt}; t, c^{ref}), \quad \hat{x}^{-}_{0|t} = x_t^{src} - t \cdot v_\phi(x_t^{src}; t, \emptyset)
 \end{equation}
-where $\hat{x}^{+}_{t \to 0}$ is the conditional prediction (positive sample) from the editor, and $\hat{x}^{-}_{t \to 0}$ is the unconditional prediction (negative sample). This contrastive formulation pushes the generation towards the edited target while pulling it away from the generic unconditional distribution, resulting in sharper and more perceptually aligned updates.
+We collect these pairs into $\mathcal{P} = \{(\hat{x}^{+}_{0|t}, \hat{x}^{-}_{0|t})\}_{t \in \mathcal{T}}$ and optimize:
+\begin{equation}
+\mathcal{L}_{\text{RED}}(x) = \frac{1}{|\mathcal{P}|} \sum_{(x^+, x^-) \in \mathcal{P}} \ell(x, x^+, x^-)
+\end{equation}
+where
+\begin{equation}
+\ell(x, x^+, x^-) = w_{ada} \cdot \left[ \| x - x^+ \|^2 - \| x - x^- \|^2 \right]
+\end{equation}
+$w_{ada} = (\| x - x^+ \|_1 + \eta)^{-1}$ is an adaptive normalization term.
+Minimizing this objective effectively distills the CFG gradient direction $\nabla_x \mathcal{L} \propto (x^+ - x^-)$ into the 3D generator.
 
-\subsection{Optimization via Trajectory Propagation}
+\subsection{Optimization}
 \label{sec:optimization}
 
-\subsubsection{Trajectory-Aware Gradient Propagation.}
-OREO optimizes the 3D generator by backpropagating gradients from the final rendered image to the entire generation trajectory. Since the generation process is a discretized ODE solve:
+In the third stage, OREO optimizes the 3D generator by backpropagating gradients from the final rendered image to the entire generation trajectory. Since the generation process is a discretized ODE solve:
 \begin{equation}
 z_{t_{i-1}} = z_{t_i} - (t_i - t_{i-1}) \cdot v_\theta(z_{t_i}, t_i)
 \end{equation}
-We retain the computation graph at every step, allowing the gradients from the terminal loss $\mathcal{L}_{\text{RED}}$ to influence the velocity field predictions $v_\theta$ at all intermediate time steps $t_i$. The final objective is $\mathcal{L}_{total} = \mathcal{L}_{RED}$.
+we can compute the gradient of the loss $\mathcal{L}_{\text{RED}}$ with respect to the model parameters $\theta$ by differentiating through the ODE solver steps.
+To ensure geometric stability, we also incorporate a regularization term that penalizes deviations from the pre-trained trajectory:
+\begin{equation}
+\mathcal{L}_{reg} = \| v_\theta(z_t, t, c) - v_{\theta_{pre}}(z_t, t, c) \|^2
+\end{equation}
+where $\theta_{pre}$ represents the frozen parameters of the pre-trained 3D generator.
+The final objective is $\mathcal{L}_{total} = \mathcal{L}_{RED} + \lambda \mathcal{L}_{reg}$.
+For memory-efficient optimization, we implement a custom gradient checkpointing strategy (details in Appendix). The overall training procedure is summarized in Algorithm~\ref{alg:oreo}.
+
+\begin{algorithm}[t]
+\caption{OREO Training Loop}
+\label{alg:oreo}
+\begin{algorithmic}[1]
+\Require 3D Generator $G_\theta$, 2D Editor $\mathcal{E}_\phi$, Dataset $\mathcal{S}$, Learning rate $\eta$
+\Ensure Optimized parameters $\theta^*$
+\While{not converged}
+    \State Sample reference $x^{ref} \sim \mathcal{S}$ and camera pose $\pi$
+    \State \textbf{Forward Rollout}: Generate 3D asset $A = G_\theta(x^{ref})$ via ODE solver
+    \State Render view $x^{src} = \mathcal{P}(A, \pi)$
+    \State \textbf{Reinforced Editing}: $x^{tgt}, \mathcal{L}_{\text{RED}} \leftarrow \text{RED}(x^{src}, x^{ref}, \mathcal{E}_\phi)$ \Comment{Algorithm~\ref{alg:red}}
+    \State Compute total loss $\mathcal{L}_{total} = \mathcal{L}_{\text{RED}} + \lambda \mathcal{L}_{reg}$ \Comment{Eq. 8, 10}
+    \State Compute gradients $\nabla_\theta \mathcal{L}_{total}$ via trajectory backpropagation
+    \State Update parameters $\theta \leftarrow \theta - \eta \nabla_\theta \mathcal{L}_{total}$
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
 
 
 \section{Experiments}
@@ -233,20 +305,20 @@ We retain the computation graph at every step, allowing the gradients from the t
 
 \subsection{Experimental Setup}
 
-\subsubsection{Dataset.}
+\textbf{Dataset.}
 To validate the effectiveness of OREO in \textbf{3D concept design} scenarios, we constructed a specialized \textbf{Conceptual Design Dataset}.
 \begin{itemize}
     \item \textbf{Training Set}: Contains approximately 2,000 high-quality concept design images collected from the internet, covering sci-fi vehicles, fantasy creatures, stylized characters, and futuristic architecture. These images typically feature exaggerated proportions, unique textures, and non-realistic geometric structures, posing extremely high demands on the generalization capability of 3D generators.
     \item \textbf{Test Set}: Contains 100 unseen, highly imaginative design sketches, used to evaluate the model's ability to translate abstract ideas into 3D entities.
 \end{itemize}
 
-\subsubsection{Baselines.}
+\textbf{Baselines.}
 We compare OREO with the following baseline:
 \begin{itemize}
     \item \textbf{Trellis (Zero-shot)}: The original pre-trained Trellis model, serving as the supervised learning benchmark.
 \end{itemize}
 
-\subsubsection{Metrics.}
+\textbf{Metrics.}
 We employ a combination of quantitative and qualitative evaluations:
 \begin{itemize}
     \item \textbf{CLIP Similarity}: Measures the conceptual consistency between generated views and the input prompt.
@@ -254,7 +326,7 @@ We employ a combination of quantitative and qualitative evaluations:
     \item \textbf{User Study}: Human evaluators are invited to score the geometric quality and texture details of the generated assets.
 \end{itemize}
 
-\subsubsection{Implementation Details.}
+\textbf{Implementation Details.}
 Our experiments are implemented based on the PyTorch framework.
 \begin{itemize}
     \item \textbf{Model Architecture}: We use the pre-trained \textbf{Trellis-Image-Large} as the 3D generator backbone and \textbf{Qwen-Image-Edit} as the 2D editing teacher model. The renderer is Gaussian Splatting, with a rendering resolution of $1024 \times 1024$.
@@ -304,14 +376,14 @@ Based on the above analysis, we adopt the configuration \textbf{(Steps: 9|12, Cf
 
 We evaluated the performance of OREO and its baselines on the test set containing 100 concept design prompts.
 
-\subsubsection{Quantitative Evaluation.}
+\textbf{Quantitative Evaluation.}
 Table [Table 1] shows the scores of each method on CLIP Similarity and DINO Similarity.
 \begin{itemize}
     \item \textbf{Conceptual Alignment}: RED achieved a significant lead in CLIP Similarity, improving by about 15\% compared to the original Trellis. This indicates that our method successfully transferred the 2D editor's understanding of complex concepts to the 3D generator.
     \item \textbf{User Preference}: User Study results show that over 85\% of users prefer the assets generated by RED in terms of geometric plausibility and texture details, especially when dealing with non-standard structures of creatures and vehicles.
 \end{itemize}
 
-\subsubsection{Qualitative Evaluation.}
+\textbf{Qualitative Evaluation.}
 Figure [Figure Y] shows a visual comparison between RED and the baseline models.
 \begin{itemize}
     \item \textbf{Geometric Repair}: In the case of "Cyberpunk style mechanical prosthetic limbs", the original Trellis often generated blurred structures, while RED successfully restored clear joint and pipeline details.
@@ -323,14 +395,14 @@ Figure [Figure Y] shows a visual comparison between RED and the baseline models.
 
 To deeply understand the contribution of each component of RED, we conducted a series of ablation experiments.
 
-\subsubsection{Analyzing Loss Components.}
+\textbf{Analyzing Loss Components.}
 We verified the necessity of each part of the Contrastive Distillation Loss (CDL).
 \begin{itemize}
     \item \textbf{Replace CDL with MSE}: We attempted to directly minimize the mean squared error ($\| x^{src} - x^{tgt} \|^2$) between the rendered image and the final output of FlowEdit. Results showed that although this strategy could quickly close the conceptual distance, it easily led to geometric distortion (e.g., uneven surfaces). This is because MSE forces the model to match the editing results at the pixel level, ignoring inevitable minor geometric deviations during the 2D editing process. In contrast, CDL utilizes relative gradient directions, providing more robust conceptual guidance.
     \item \textbf{Remove Repeller Term ($\| x^{src} - \hat{x}^{-}_{t \to 0} \|^2$)}: Retaining only the attractor term led to the model overfitting the editing target, ignoring the suppression of the unconditional distribution, resulting in generated textures that were too smooth and lacked detail.
 \end{itemize}
 
-\subsubsection{Sampling Strategy Analysis.}
+\textbf{Sampling Strategy Analysis.}
 To balance training efficiency and performance, we adopted Multi-step Time Sampling (MTS Sampling).
 \begin{itemize}
     \item \textbf{Fixed Timestep}: If optimization is performed only at a fixed noise level (e.g., $t=500$), the model struggles to handle diverse input distributions, resulting in insufficient texture detail after convergence.
