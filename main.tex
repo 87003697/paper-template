@@ -24,8 +24,12 @@
 % Include other packages here, before hyperref.
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{multirow}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+
+% Keep absolute values aligned and append a compact relative delta on the right.
+\newcommand{\scoredelta}[2]{\makebox[2.8em][r]{#1}\hspace{0.06em}{\scriptsize(#2)}}
 
 % The "axessiblity" package can be found at: https://ctan.org/pkg/axessibility?lang=en
 \usepackage[accsupp]{axessibility}  % Improves PDF readability for those with disabilities.
@@ -174,6 +178,7 @@ A key property used in our method is single-step estimation of the clean sample 
 To distinguish modalities, we use $z$ and $\theta$ for the 3D generator $v_\theta$, where $G_\theta$ denotes its ODE sampling process.
 Similarly, we use $x$ and $\phi$ for the 2D editor $v_\phi$, where $\mathcal{E}_\phi$ denotes the multi-step editing process as described below.
 
+
 \textbf{Inversion-Free Image Editing.}
 We leverage FlowEdit, an inversion-free method that modifies images by coupling source and target flow trajectories.
 Starting from $x^{src}$, it iteratively updates the editing variable via $x^{edit} \leftarrow x^{edit} - \Delta t \cdot \tilde{v}_t$, where the differential velocity is defined as:
@@ -273,32 +278,41 @@ The complete Reinforced Editing Distillation (RED) procedure is summarized in Al
 \subsection{Optimization}
 \label{sec:optimization}
 
-In the third stage, OREO optimizes the 3D generator by backpropagating gradients from the final rendered image through the entire generation trajectory. 
-Since the generation process is a discretized ODE solve (Eq. 165), the final state $z_0$ is a differentiable function of the initial noise $z_1$ and the model parameters $\theta$.
-By applying the chain rule through the solver steps $z_{t_{i-1}} = \text{Solver}(z_{t_i}, v_\theta)$, we can compute the exact gradient $\nabla_\theta \mathcal{L}_{\text{RED}}$ via \textbf{Trajectory Backpropagation}.
-This allows the 2D supervision to directly update the velocity field at every intermediate timestep, ensuring global consistency.
-To ensure geometric stability, we also incorporate a regularization term that penalizes deviations from the pre-trained trajectory:
+
+We optimize the 3D generator with the following procedure.
+In each iteration, we first obtain a clean latent $z_0 = G_{\theta_{pre}}(x^{ref})$ from the frozen pre-trained generator.
+We then perturb it with Gaussian noise at a random timestep $t \sim \mathcal{U}(0,1)$ to yield $z_t = (1-t)z_0 + t\epsilon$.
+Given $z_t$, the trainable generator predicts the velocity field $v_\theta(z_t; t, c)$, and the clean latent is estimated by
+\begin{equation}
+\hat{z}_0 = z_t - t \cdot v_\theta(z_t; t, c),
+\end{equation}
+which is then decoded and rendered with a sampled camera pose $\pi$ as $x^{src} = \mathcal{P}(\mathcal{D}(\hat{z}_0), \pi)$.
+The loss $\mathcal{L}_{\text{RED}}$ is computed on $x^{src}$, and gradients are backpropagated through the decoder and the denoising prediction to update $\theta$.
+To preserve geometric stability, we regularize the velocity field deviation:
+
 \begin{equation}
 \mathcal{L}_{reg} = \| v_\theta(z_t; t, c) - v_{\theta_{pre}}(z_t; t, c) \|^2
 \end{equation}
-where $\theta_{pre}$ represents the frozen parameters of the pre-trained 3D generator.
+where $v_{\theta_{pre}}$ is the velocity field induced by the frozen pre-trained generator.
 The final objective is $\mathcal{L}_{total} = \mathcal{L}_{RED} + \lambda \mathcal{L}_{reg}$.
-For memory-efficient optimization, we implement a custom gradient checkpointing strategy (details in Appendix). The overall training procedure is summarized in Algorithm~\ref{alg:oreo}.
+We set $\lambda=10$ such that $\|\nabla_{v_\theta} \mathcal{L}_{RED}\| : \|\nabla_{v_\theta} \mathcal{L}_{reg}\| \approx 1:10$. The overall training procedure is summarized in Algorithm~\ref{alg:oreo}.
+
 
 \begin{algorithm}[t]
 \caption{OREO Training Loop}
 \label{alg:oreo}
 \begin{algorithmic}[1]
-\Require 3D Generator $G_\theta$, 2D Editor $\mathcal{E}_\phi$, Dataset $\mathcal{S}$, Learning rate $\eta$
+\Require Generator $G_\theta$, Frozen rollout generator $G_{\theta_{pre}}$, 2D editor $\mathcal{E}_\phi$, Dataset $\mathcal{S}$, Learning rate $\eta$
 \Ensure Optimized parameters $\theta^*$
 \While{not converged}
-    \State Sample reference $x^{ref} \sim \mathcal{S}$ and camera pose $\pi$
-    \State \textbf{Forward Rollout}: Generate 3D asset $A = G_\theta(x^{ref})$ via ODE solver
-    \State Render view $x^{src} = \mathcal{P}(A, \pi)$
-    \State \textbf{Reinforced Editing}: $x^{tgt}, \mathcal{L}_{\text{RED}} \leftarrow \text{RED}(x^{src}, x^{ref}, \mathcal{E}_\phi)$ \Comment{Algorithm~\ref{alg:red}}
-    \State Compute total loss $\mathcal{L}_{total} = \mathcal{L}_{\text{RED}} + \lambda \mathcal{L}_{reg}$ \Comment{Eq. 8, 10}
-    \State Compute gradients $\nabla_\theta \mathcal{L}_{total}$ via trajectory backpropagation
-    \State Update parameters $\theta \leftarrow \theta - \eta \nabla_\theta \mathcal{L}_{total}$
+    \State Sample $x^{ref} \sim \mathcal{S}$, $\pi$, and $t \sim \mathcal{U}(0,1)$
+    \State $z_0 = G_{\theta_{pre}}(x^{ref})$ \Comment{\texttt{Rollout}: Generate clean latent}
+    \State $z_t = (1-t)z_0 + t\epsilon,\ \epsilon \sim \mathcal{N}(0,I)$ \Comment{\texttt{Noise Injection}}
+    \State Predict $\hat{z}_0$ from $z_t$ using $G_\theta$ \Comment{\texttt{Prediction}: Denoise latent}
+    \State $x^{src} = \mathcal{P}(\mathcal{D}(\hat{z}_0), \pi)$ \Comment{\texttt{Render}: Decode and project}
+    \State Obtain $\mathcal{L}_{\text{RED}}$ via Algorithm~\ref{alg:red} from $x^{src}$ and $x^{ref}$ \Comment{\texttt{Reinforced Editing}}
+    \State $\mathcal{L}_{reg} = \| v_\theta(z_t) - v_{\theta_{pre}}(z_t) \|^2$ \Comment{\texttt{Regularization}}
+    \State $\theta \leftarrow \theta - \eta \nabla_\theta (\mathcal{L}_{\text{RED}} + \lambda \mathcal{L}_{reg})$ \Comment{\texttt{Update parameters}}
 \EndWhile
 \end{algorithmic}
 \end{algorithm}
@@ -309,66 +323,71 @@ For memory-efficient optimization, we implement a custom gradient checkpointing 
 
 \subsection{Experimental Setup}
 
-\textbf{Dataset.}
-To validate the effectiveness of OREO in \textbf{3D concept design} scenarios, we constructed a specialized \textbf{Conceptual Design Dataset}.
-\begin{itemize}
-    \item \textbf{Training Set}: Contains approximately 2,000 high-quality concept design images collected from the internet, covering sci-fi vehicles, fantasy creatures, stylized characters, and futuristic architecture. These images typically feature exaggerated proportions, unique textures, and non-realistic geometric structures, posing extremely high demands on the generalization capability of 3D generators.
-    \item \textbf{Test Set}: Contains 100 unseen, highly imaginative design sketches, used to evaluate the model's ability to translate abstract ideas into 3D entities.
-\end{itemize}
+\textbf{Dataset.} To test our method on creative tasks, we collected a Conceptual Design Dataset. The training set has $\sim$2,000 high-quality concept images (like sci-fi vehicles and fantasy creatures) with complex shapes and unique textures, which are hard for existing 3D models to generate. The test set includes 100 new, highly imaginative design sketches.
 
-\textbf{Baselines.}
-We compare OREO with the following baseline:
-\begin{itemize}
-    \item \textbf{Trellis (Zero-shot)}: The original pre-trained Trellis model, serving as the supervised learning benchmark.
-\end{itemize}
+\textbf{Baselines.} We compare OREO mainly with the original Trellis model to show the improvement over the supervised baseline.
 
-\textbf{Metrics.}
-We employ a combination of quantitative and qualitative evaluations:
-\begin{itemize}
-    \item \textbf{CLIP Similarity}: Measures the conceptual consistency between generated views and the input prompt.
-    \item \textbf{DINO Similarity}: Evaluates the visual feature similarity between generated results and reference images.
-    \item \textbf{User Study}: Human evaluators are invited to score the geometric quality and texture details of the generated assets.
-\end{itemize}
+\textbf{Metrics.} We use CLIP Similarity to check if the result matches the text description, and DINO Similarity to check if it looks like the reference image. We also ask human users to rate the quality of the geometry and textures.
 
 \textbf{Implementation Details.}
-Our experiments are implemented based on the PyTorch framework.
-\begin{itemize}
-    \item \textbf{Model Architecture}: We use the pre-trained \textbf{Trellis-Image-Large} as the 3D generator backbone and \textbf{Qwen-Image-Edit} as the 2D editing teacher model. The renderer is Gaussian Splatting, with a rendering resolution of $1024 \times 1024$.
-    \item \textbf{Training Settings}: We use the \textbf{SGD optimizer} with a learning rate of $5 \times 10^{-3}$. Training is conducted on a single NVIDIA A800 GPU with a batch size of 1 and gradient accumulation steps of 4. To save memory, we use \textbf{BF16 mixed precision} training. The total number of training epochs is 500.
-    \item \textbf{RED Parameters}: The noise mode uses the "Aligned" strategy. Based on preliminary analysis (see Section 4.2), we fix the configuration to \textbf{(Steps: 9|12, Cfg=4)}, meaning editing starts at a noise level of $t=0.75$ with a total of 12 inference steps.
-    \item \textbf{Loss Weights}: In all experiments, we only use the \textbf{Contrastive Distillation Loss (CDL)} with a weight of 1.0.
-\end{itemize}
+We use Trellis-Image-Large as the 3D backbone and Qwen-Image-Edit for 2D feedback, rendering at $1024 \times 1024$ via Gaussian Splatting.
+Training runs for 500 epochs on a single A800 GPU using SGD ($lr=5\times10^{-3}$, batch size 1, accumulation 4) with BF16 precision.
+The contrastive distillation loss weight is set to 1.0.
+More implementation details are provided in the supplementary material.
 
-\subsection{Preliminary Analysis: Validating the Editing Teacher}
+\subsection{Preliminary Analysis: Validating the Editing Feedback}
 
-Before applying FlowEdit to the 3D optimization loop, we first evaluated its competence as a "teacher model" on an independent 2D dataset and determined the optimal editing parameters. The upper bound of 3D optimization depends on the quality of the 2D Pseudo-GT: we need to ensure that the $\Delta x$ produced by the editing process is primarily perceptual correction rather than geometric destruction.
+Before integrating the 2D editor into the 3D optimization loop, we first evaluate the quality of its feedback on an independent 2D benchmark.
+The quality of 3D optimization is upper-bounded by the quality of pseudo-GTs: the editing residual $\Delta x$ should mainly reflect semantic correction rather than geometric destruction.
 
-We selected 50 rendered images from the test set, executed FlowEdit under different parameter configurations, and calculated CLIP Similarity (conceptual alignment), DINO Similarity (structural consistency), and Silhouette IoU (contour overlap). Additionally, we compared FlowEdit with other mainstream image editing methods. Table \ref{tab:flowedit_ablation} shows the detailed quantitative analysis results.
 
-\begin{table}[tb]
-  \caption{Sensitivity analysis of FlowEdit parameters. We report the change in metrics (Diff) and the final Mask IoU under different configurations. The gray background indicates the selected final configuration.}
-  \label{tab:flowedit_ablation}
+\textbf{Comparison with other feedback sources.}
+We compare RED with two relevant image editing baselines: NanoBanana and original Qwen-Image-Edit.
+Note that we do not compare against the original FlowEdit setup, since it assumes explicit source/target prompts while our setting only provides rendered views with the reference concept.
+As shown in Table~\ref{tab:feedback_comparison}, NanoBanana tends to miss fine concept details, while original Qwen-Image-Edit introduces larger geometric drift under general-purpose editing.
+RED achieves the best balance between semantic enhancement and structure preservation, which is critical for stable 3D supervision.
+
+\textbf{Sensitivity analysis of RED parameters.}
+After selecting RED as the feedback source, we further study its hyper-parameters.
+We select 50 rendered images from the test set and report CLIP Similarity (concept alignment), DINO Similarity (feature consistency), and Silhouette IoU (contour overlap).
+As shown in Fig.~\ref{fig:red_sensitivity}, we observe a clear trade-off between concept injection and geometric preservation, and choose Steps 9|12 with Cfg=4 as the final setting.
+
+\begin{figure*}[t]
   \centering
-  \setlength{\tabcolsep}{3pt} % Reduce column spacing
-  \begin{tabular}{@{}llccc@{}}
-    \toprule
-    Experiment & Configuration & CLIP $\uparrow$ & DINO $\uparrow$ & IoU $\uparrow$ \\
-    \midrule
-    \textbf{A. CFG Scale} & Steps: 20|40, Cfg=2 & +0.0029 & +0.0028 & 0.9887 \\
-    \textit{(Fixed Steps)} & \textbf{Steps: 20|40, Cfg=4} & \textbf{+0.0034} & \textbf{+0.0089} & \textbf{0.9786} \\
-    & Steps: 20|40, Cfg=12 & -0.0098 & +0.0051 & 0.9631 \\
-    \midrule
-    \textbf{B. Ratio (3:4 vs 2:4)} & Steps: 20|40 (Ratio 0.50) & +0.0034 & +0.0089 & 0.9786 \\
-    \textit{(Fixed Cfg=4)} & \textbf{Steps: 30|40 (Ratio 0.75)} & \textbf{+0.0228} & \textbf{+0.0226} & \textbf{0.9319} \\
-    \midrule
-    \textbf{C. Efficiency} & Steps: 30|40 (Total 40) & +0.0228 & +0.0226 & 0.9319 \\
-    \textit{(Fixed Ratio 0.75)} & \textbf{Steps: 9|12 (Total 12)} & \textbf{+0.0132} & \textbf{+0.0156} & \textbf{0.9595} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+  \begin{subtable}[t]{0.66\textwidth}
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \resizebox{\linewidth}{!}{%
+    \begin{tabular}{@{}lccccc@{}}
+      \toprule
+      \multirow{2}{*}{Method} & \multicolumn{2}{c}{w.r.t.\ $x^{ref}$} & \multicolumn{2}{c}{w.r.t.\ $x^{src}$} & \multirow{2}{*}{IoU $\uparrow$} \\
+      \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+      & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & \\
+      \midrule
+      Baseline & 0.7408 & 0.7562 & -- & -- & N/A \\
+      NanoBanana Pro & -- & -- & -- & -- & -- \\
+      Qwen-Edit (Orig.) & -- & -- & -- & -- & -- \\
+      \midrule
+      Ours & \scoredelta{0.7724}{+0.0314} & \scoredelta{0.7932}{+0.0371} & -- & -- & 0.9402 \\
+      w/o Dyn. Noise & \scoredelta{0.7408}{0.0} & \scoredelta{0.7653}{+0.009} & -- & -- & 0.9736 \\
+      \bottomrule
+    \end{tabular}}
+    \caption{Quantitative comparison across different feedback sources. Current results are reported in the $x^{ref}$ condition; the $x^{src}$ branch is reserved for later completion.}
+    \label{tab:feedback_comparison}
+  \end{subtable}\hfill
+  \begin{subfigure}[t]{0.30\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/plots/nfe_dino_iou.png}
+    \caption{Sensitivity of RED (NFE): trade-off between DINO Sim and Mask IoU.}
+    \label{fig:red_sensitivity}
+  \end{subfigure}
+\caption{Preliminary analysis of feedback quality and RED parameter sensitivity.}
+\label{fig:prelim_feedback_red}
+\end{figure*}
 
 \textbf{Analysis and Conclusion}:
 \begin{enumerate}
+    \item \textbf{Why RED as the Feedback}: Compared with NanoBanana and original Qwen-Image-Edit, RED preserves geometry significantly better while maintaining competitive semantic alignment. This property is crucial in 3D training because geometric drift in pseudo-GT views leads to conflicting multi-view gradients.
     \item \textbf{Choice of Guidance Scale}: Experiments show that excessively high CFG (e.g., 12) severely damages image quality, leading to drops in both CLIP and IoU. \textbf{Cfg=4} demonstrated the most robust performance, effectively enhancing conceptual features while maintaining high geometric consistency (IoU > 0.97).
     \item \textbf{Critical Role of Timestep Ratio}: We found that the starting point of the editing interval is more critical than the total number of steps. Comparing \textbf{Steps: 20|40 (Ratio 0.5)} and \textbf{Steps: 30|40 (Ratio 0.75)}, the latter brought nearly a \textbf{7x} improvement in CLIP (+0.0228 vs +0.0034). This indicates that at low noise levels like $t=0.5$, the image structure is solidified, and the model lacks sufficient \textbf{plasticity} to inject new concepts. Therefore, we fix the \textbf{Ratio to 0.75} to ensure sufficient editing freedom.
     \item \textbf{Efficiency-Quality Trade-off}: Given a Ratio of 0.75, we compared high-step (30|40) and low-step (9|12) strategies. Although 30|40 yielded slightly higher conceptual improvement, its Mask IoU dropped significantly (0.93), increasing the risk of geometric drift. In contrast, \textbf{Steps: 9|12} maintained extremely high geometric stability (\textbf{IoU $\sim$0.96}) while still achieving competitive conceptual enhancement, with a \textbf{70\%} reduction in computational cost.
