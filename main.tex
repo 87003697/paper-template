@@ -132,6 +132,15 @@ In summary, our contributions are as follows:
     \item We validate the effectiveness of OREO on state-of-the-art 3D generators. Results show that our method effectively improves visual realism and texture richness while preserving geometric integrity.
 \end{enumerate}
 
+\section{Related Work}
+\label{sec:related_work}
+
+\noindent\textbf{Post-training of Pretrained 3D Generators.}
+As 3D generation has shifted from optimization-based pipelines to large-scale pretraining, post-training has become the key stage for adapting generic priors to target objectives. Recent 3D-native foundations are first pretrained on large synthetic 3D corpora~\cite{xiang2025structured,zhao2025hunyuan3d,ye2025hi3dgen,li2025triposg,guo2025hyper3d,yushi2025gaussiananything}, and then further tuned with task-specific data to improve geometric stability and appearance controllability. From a pipeline perspective, post-training is typically performed in either geometry--texture coupled or decoupled frameworks: coupled methods update geometry and texture jointly in a unified representation~\cite{chen20253dtopia,xiang2025structured,yushi2025gaussiananything,lin2025diffsplat}, while decoupled methods commonly constrain or freeze geometry first and adapt the texturing stage afterward~\cite{zhao2025hunyuan3d,ye2025hi3dgen,li2025triposg,li2025step1x,guo2025hyper3d,zhang2025bang}. This pretrain-then-post-train paradigm enables efficient specialization while preserving diversity from large-scale pretraining.
+
+\noindent\textbf{Texture-centric Adaptation and Realism Alignment.}
+To address the realism gap of pretrained generators, post-training research mainly follows two directions. One line directly fine-tunes 3D-native texturing models under 3D-consistency constraints~\cite{yu2024texgen,xiong2025texgaussian,liu2024texoct}; the other fine-tunes multi-view image generators on 3D data and then fuses generated views into UV textures~\cite{huang2025mv,liang2025unitex,bensadoun2024meta,fei2025pacture,he2025materialmvp}. Additional efforts leverage real-image supervision or material-map enhancement~\cite{Jiang2025ICCV,he2025materialmvp,fei2025pacture,huang2025material,fang2024make}, but are still limited by cross-view inconsistency, rendering-dependent improvements, or the scale and fidelity bottlenecks of real scanned 3D datasets~\cite{downs2022google,dong2025digital,brazil2023omni3d}. Overall, current post-training trends emphasize combining multi-view consistency, structure-aware constraints, and realistic detail supervision to produce stable, rendering-independent photorealistic 3D outputs.
+
 \section{Method}
 \label{sec:method}
 
@@ -450,5 +459,10 @@ To balance training efficiency and performance, we adopted Multi-step Time Sampl
 This paper proposes \textbf{OREO}, a general post-training framework for 3D concept design scenarios. Addressing the generalization bottleneck of existing 3D generative models when handling highly stylized and non-standard geometric inputs, we innovatively introduce an enhanced editing mechanism based on FlowEdit. By constructing a \textbf{Contrastive Distillation Loss}, OREO successfully distills the rich conceptual priors contained in 2D foundation models into 3D generators. Experimental results show that our method significantly outperforms supervised baselines in conceptual consistency, geometric fidelity, and texture detail, providing an efficient new path for solving the data scarcity problem in 3D generation.
 
 \textbf{Future Work.} Although OREO performs well, there is still room for further exploration. First, the current FlowEdit process has high inference costs; future work could explore more efficient distillation strategies (e.g., one-step editing). Second, we will attempt to extend OREO to more complex scene generation tasks, utilizing panoramic editing models to optimize large-scale 3D environments. Finally, combining with Large Multimodal Models (LMM) for more fine-grained interactive editing is also an exciting direction.
+
+\clearpage
+
+\bibliographystyle{splncs04}
+\bibliography{main}
 
 \end{document}
