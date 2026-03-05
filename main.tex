@@ -211,6 +211,32 @@ where the \textbf{source branch} and the \textbf{target branch} is constructed a
 The editing process is performed over the last $N_e$ steps of the full $N$-step ODE schedule.
 With integration step size $\Delta t = t_{i-1} - t_i$, $x^{\texttt{edit}}$ evolves into $x^{\texttt{tgt}}$, which transfers the image from being consistent with $c^{\texttt{src}}$ to following $c^{\texttt{tgt}}$ without the need for costly inversion that maps the image back to noise, thereby preserving structural fidelity.
 
+
+\begin{algorithm}[t]
+    \caption{Reinforced Editing}
+    \label{alg:red}
+    \begin{algorithmic}[1]
+    \Require Rendered view $x^{\texttt{src}}$, Reference condition $c^{\texttt{ref}}$, Editor $\mathcal{E}_\phi$, Guidance scale $w$, Editing steps $N_e$, Total steps $N$
+    \Ensure Pseudo-GT $x^{\texttt{tgt}}$
+    \State Initialize $x^{\texttt{edit}} \leftarrow x^{\texttt{src}}$, Sample noise $\epsilon \sim \mathcal{N}(0, I)$
+    \State Select time steps $\{t_i\}_{i=0}^{N_e}$ as the last $N_e$ steps from the full schedule of $N$ steps
+    \For{$i = 0$ to $N_e-1$} \Comment{\texttt{FlowEdit: Backward Euler Integration}}
+        \State $t \leftarrow t_i$, $\Delta t \leftarrow t_{i+1} - t_i$
+        \State $x^{\texttt{src}}(t) \leftarrow (1-t)x^{\texttt{src}} + t\epsilon$
+        \State $x^{\texttt{tgt}}(t) \leftarrow x^{\texttt{edit}} + (x^{\texttt{src}}(t) - x^{\texttt{src}})$ \Comment{\texttt{Eq.~\ref{eq:flowedit_states}}}
+        
+        \Statex \texttt{// Reinforced Editing (Sec.~\ref{sec:reinforced_editing})}
+        \State $\tilde{v} \leftarrow v_\phi^{w}(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi^{-w}(x^{\texttt{src}}(t); t, c^{\texttt{ref}})$ \Comment{\texttt{Eq.~\ref{eq:red_diff_velocity}}}
+        \State $x^{\texttt{edit}} \leftarrow x^{\texttt{edit}} - \tilde{v} \Delta t$ \Comment{\texttt{FlowEdit: Euler Step}}
+    
+        \Statex \texttt{// Noise Update}
+        \State $\epsilon \leftarrow \epsilon - (v_\phi(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi(x^{\texttt{tgt}}(t); t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Eq.~\ref{eq:red_dynamic_noise}}}
+    \EndFor
+    \State \Return $x^{\texttt{tgt}} \leftarrow x^{\texttt{edit}}$
+    \end{algorithmic}
+    \end{algorithm}
+
+
 \subsection{Constructing On-the-fly Pseudo-GTs via Reinforced Editing}
 \label{sec:reinforced_editing}
 
@@ -236,29 +262,28 @@ We mitigate this by updating $\epsilon$ via:
 \end{equation}
 This update effectively injects the classifier guidance term in Eq.~\ref{eq:cfg_guidance} into the noise, reducing variance and preserving fine-grained structural details.
 
-\begin{algorithm}[t]
-\caption{Reinforced Editing}
-\label{alg:red}
-\begin{algorithmic}[1]
-\Require Rendered view $x^{\texttt{src}}$, Reference condition $c^{\texttt{ref}}$, Editor $\mathcal{E}_\phi$, Guidance scale $w$, Editing steps $N_e$, Total steps $N$
-\Ensure Pseudo-GT $x^{\texttt{tgt}}$
-\State Initialize $x^{\texttt{edit}} \leftarrow x^{\texttt{src}}$, Sample noise $\epsilon \sim \mathcal{N}(0, I)$
-\State Select time steps $\{t_i\}_{i=0}^{N_e}$ as the last $N_e$ steps from the full schedule of $N$ steps
-\For{$i = 0$ to $N_e-1$} \Comment{\texttt{FlowEdit: Backward Euler Integration}}
-    \State $t \leftarrow t_i$, $\Delta t \leftarrow t_{i+1} - t_i$
-    \State $x^{\texttt{src}}(t) \leftarrow (1-t)x^{\texttt{src}} + t\epsilon$
-    \State $x^{\texttt{tgt}}(t) \leftarrow x^{\texttt{edit}} + (x^{\texttt{src}}(t) - x^{\texttt{src}})$ \Comment{\texttt{Eq.~\ref{eq:flowedit_states}}}
-    
-    \Statex \texttt{// Reinforced Editing (Sec.~\ref{sec:reinforced_editing})}
-    \State $\tilde{v} \leftarrow v_\phi^{w}(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi^{-w}(x^{\texttt{src}}(t); t, c^{\texttt{ref}})$ \Comment{\texttt{Eq.~\ref{eq:red_diff_velocity}}}
-    \State $x^{\texttt{edit}} \leftarrow x^{\texttt{edit}} - \tilde{v} \Delta t$ \Comment{\texttt{FlowEdit: Euler Step}}
 
-    \Statex \texttt{// Noise Update}
-    \State $\epsilon \leftarrow \epsilon - (v_\phi(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi(x^{\texttt{tgt}}(t); t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Eq.~\ref{eq:red_dynamic_noise}}}
-\EndFor
-\State \Return $x^{\texttt{tgt}} \leftarrow x^{\texttt{edit}}$
-\end{algorithmic}
-\end{algorithm}
+\begin{algorithm}[t]
+    \caption{Closed-loop Optimization via Dynamic Pseudo-GTs}
+    \label{alg:oreo}
+    \begin{algorithmic}[1]
+    \Require Generator $G_\theta$, Frozen rollout generator $G_{\theta_{pre}}$, 2D editor $\mathcal{E}_\phi$, Dataset $\mathcal{S}$, Learning rate $\eta$
+    \Ensure Optimized parameters $\theta^*$
+    \While{not converged}
+        \State Sample $x^{\texttt{ref}} \sim \mathcal{S}$, $\pi$, and $t \sim \mathcal{U}(0,1)$
+        \State $z_0 = G_{\theta_{pre}}(x^{\texttt{ref}})$ \Comment{\texttt{Rollout}: Generate clean latent}
+        \State $z_t = (1-t)z_0 + t\epsilon,\ \epsilon \sim \mathcal{N}(0,I)$ \Comment{\texttt{Noise Injection}}
+        \State Predict $\hat{z}_0$ from $z_t$ using $G_\theta$ \Comment{\texttt{Prediction}: Denoise latent}
+        \State $x^{\texttt{src}} = \mathcal{P}(\mathcal{D}(\hat{z}_0), \pi)$ \Comment{\texttt{Render}: Decode and project}
+        \State Obtain $x^{\texttt{tgt}}$ via Algorithm~\ref{alg:red} from $x^{\texttt{src}}$ and $x^{\texttt{ref}}$ \Comment{\texttt{Reinforced Editing}}
+        \State $\mathcal{L}_{sup} = \| x^{\texttt{src}} - x^{\texttt{tgt}} \|^2$ \Comment{\texttt{Supervision}}
+        \State $\mathcal{L}_{reg} = \| v_\theta(z_t) - v_{\theta_{pre}}(z_t) \|^2$ \Comment{\texttt{Regularization}}
+        \State $\theta \leftarrow \theta - \eta \nabla_\theta (\mathcal{L}_{sup} + \lambda \mathcal{L}_{reg})$ \Comment{\texttt{Update parameters}}
+    \EndWhile
+    \end{algorithmic}
+    \end{algorithm}
+    
+
 
 \subsection{Generator Optimization via Pseudo-GT Supervision}
 \label{sec:optimization}
@@ -287,30 +312,42 @@ The final objective is $\mathcal{L}_{total} = \mathcal{L}_{sup} + \lambda \mathc
 The overall training procedure is summarized in Algorithm~\ref{alg:oreo}.
 
 
-\begin{algorithm}[t]
-\caption{Closed-loop Optimization via Dynamic Pseudo-GTs}
-\label{alg:oreo}
-\begin{algorithmic}[1]
-\Require Generator $G_\theta$, Frozen rollout generator $G_{\theta_{pre}}$, 2D editor $\mathcal{E}_\phi$, Dataset $\mathcal{S}$, Learning rate $\eta$
-\Ensure Optimized parameters $\theta^*$
-\While{not converged}
-    \State Sample $x^{\texttt{ref}} \sim \mathcal{S}$, $\pi$, and $t \sim \mathcal{U}(0,1)$
-    \State $z_0 = G_{\theta_{pre}}(x^{\texttt{ref}})$ \Comment{\texttt{Rollout}: Generate clean latent}
-    \State $z_t = (1-t)z_0 + t\epsilon,\ \epsilon \sim \mathcal{N}(0,I)$ \Comment{\texttt{Noise Injection}}
-    \State Predict $\hat{z}_0$ from $z_t$ using $G_\theta$ \Comment{\texttt{Prediction}: Denoise latent}
-    \State $x^{\texttt{src}} = \mathcal{P}(\mathcal{D}(\hat{z}_0), \pi)$ \Comment{\texttt{Render}: Decode and project}
-    \State Obtain $x^{\texttt{tgt}}$ via Algorithm~\ref{alg:red} from $x^{\texttt{src}}$ and $x^{\texttt{ref}}$ \Comment{\texttt{Reinforced Editing}}
-    \State $\mathcal{L}_{sup} = \| x^{\texttt{src}} - x^{\texttt{tgt}} \|^2$ \Comment{\texttt{Supervision}}
-    \State $\mathcal{L}_{reg} = \| v_\theta(z_t) - v_{\theta_{pre}}(z_t) \|^2$ \Comment{\texttt{Regularization}}
-    \State $\theta \leftarrow \theta - \eta \nabla_\theta (\mathcal{L}_{sup} + \lambda \mathcal{L}_{reg})$ \Comment{\texttt{Update parameters}}
-\EndWhile
-\end{algorithmic}
-\end{algorithm}
-
-
 \section{Experiments}
 \label{sec:experiments}
 
+
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{\detokenize{figures/OREO Edit Comparison.drawio.png}}
+    \caption{Qualitative comparison of different 2D feedback sources used for pseudo-GT generation.}
+    \label{fig:edit_comparison}
+  \end{figure*}
+
+
+\begin{table*}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{@{}lccccc@{}}
+      \toprule
+      \multirow{2}{*}{Method} & \multicolumn{2}{c}{w.r.t.\ $x^{\texttt{ref}}$} & \multicolumn{2}{c}{w.r.t.\ $x^{\texttt{src}}$} & \multirow{2}{*}{IoU $\uparrow$} \\
+      \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+      & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & \\
+      \midrule
+      Baseline & 0.7408 & 0.7562 & N/A & N/A & N/A \\
+      \cmidrule(lr){1-6}
+      NanoBanana Pro & 0.9216 & 0.9030 & 0.8233 & 0.7720 & 0.6067 \\
+      Qwen-Edit (Orig.) & 0.9134 & 0.9002 & 0.7772 & 0.7206 & 0.5104 \\
+      \midrule
+      Ours & \scoredelta{0.7724}{+0.0314} & \scoredelta{0.7932}{+0.0371} & 0.9104 & 0.8986 & 0.9402 \\
+      \bottomrule
+    \end{tabular}}
+    \caption{Quantitative comparison across different feedback sources.}
+    \label{tab:feedback_comparison}
+  \end{table*}
+
+  
 \subsection{Preliminary Analysis: Validating the Editing Feedback}
 \label{4_1}
 
@@ -325,67 +362,52 @@ We implement our Reinforced Editing (RE) algorithm using Qwen-Image-Edit as the 
 
 
 
-\textbf{Quantitative Results.}
-As shown in Table~\ref{tab:feedback_comparison}, RE achieves the strongest balance between semantic enhancement and structural preservation, reflected by consistently high CLIP, DINO, and IoU scores.
-
 \textbf{Qualitative Analysis.}
 Fig.~\ref{fig:edit_comparison} visualizes the feedback quality. A critical challenge is maintaining the camera perspective of the source view $x^{\texttt{src}}$.
 The original Qwen-Image-Edit often fails to respect the source viewpoint, either reverting to the reference view $x^{\texttt{ref}}$ or hallucinating an arbitrary angle, which introduces severe geometric conflicts.
 NanoBanana, while more stable, tends to over-smooth details.
 In contrast, Reinforced Editing injects high-fidelity textures while strictly adhering to the source perspective, ensuring geometrically aligned supervision.
 
+\textbf{Quantitative Results.}
+We use CLIP and DINO embedding similarity to measure semantic similarity, and Mask IoU to measure viewpoint and structural consistency.
+The \textit{Baseline} row represents the unedited rendered view $x^{\texttt{src}}$, quantifying its initial alignment with the reference $x^{\texttt{ref}}$.
+As shown in Table~\ref{tab:feedback_comparison}, baseline editors can achieve high similarity to $x^{\texttt{ref}}$ but deviate substantially from $x^{\texttt{src}}$, which is evidenced by their low Mask IoU.
+In contrast, RE maintains high similarity to $x^{\texttt{src}}$ while still improving semantic fidelity.
+
+
+
+\textbf{Ablation Study on RE Parameters.}
+After selecting RE as the feedback source, we further study its key hyper-parameters: the editing ratio $N_e/N$ and the absolute editing steps $N_e$, as discussed in Sec.~\ref{sec:reinforced_editing}.
+We sample 50 rendered views from the test set and report CLIP Similarity, DINO Similarity, and Mask IoU.
+As shown in Fig.~\ref{fig:ablation_ratio_steps}(a) and Fig.~\ref{fig:ablation_vis}(a), a ratio of 0.75 provides the best balance between semantic injection and structural preservation.
+Lower ratios limit editing plasticity, while full editing 1.0 destroys the original geometry.
+Furthermore, as shown in Fig.~\ref{fig:ablation_ratio_steps}(b) and Fig.~\ref{fig:ablation_vis}(b), increasing editing steps beyond 9 yields diminishing returns in semantic gain while significantly increasing computational cost.
+Therefore, we use $N_e=9$, $N=12$ for all subsequent 3D experiments.
 
 
 \begin{figure*}[t]
   \centering
-  \includegraphics[width=\textwidth]{\detokenize{figures/OREO Edit Comparison.drawio.png}}
-  \caption{Qualitative comparison of different 2D feedback sources used for pseudo-GT generation.}
-  \label{fig:edit_comparison}
+  \includegraphics[width=\textwidth]{figures/plots/ablation_ratio_steps.png}
+  \caption{Sensitivity Analysis of RE Parameters. (a) \textbf{Effect of Editing Ratio ($N_e/N$)}: A ratio of 0.75 yields the best trade-off between semantic improvement (CLIP/DINO $\Delta$) and structural consistency (Mask IoU). (b) \textbf{Effect of Editing Steps ($N_e$)}: Under a fixed ratio ($\approx 0.75$), fewer steps (e.g., 9) achieve comparable performance to more expensive settings (e.g., 30) with significantly lower cost.}
+  \label{fig:ablation_ratio_steps}
 \end{figure*}
 
-\textbf{Sensitivity analysis of RED parameters.}
-After selecting RED as the feedback source, we further study its hyper-parameters.
-We select 50 rendered images from the test set and report CLIP Similarity (concept alignment), DINO Similarity (feature consistency), and Silhouette IoU (contour overlap).
-As shown in Fig.~\ref{fig:red_sensitivity}, we observe a clear trade-off between concept injection and geometric preservation, and choose Steps 9|12 with Cfg=4 as the final setting.
-
-\begin{table*}[t]
+\begin{figure*}[t]
   \centering
-  \setlength{\tabcolsep}{3pt}
-  \resizebox{\textwidth}{!}{%
-  \begin{tabular}{@{}lccccc@{}}
-    \toprule
-    \multirow{2}{*}{Method} & \multicolumn{2}{c}{w.r.t.\ $x^{\texttt{ref}}$} & \multicolumn{2}{c}{w.r.t.\ $x^{\texttt{src}}$} & \multirow{2}{*}{IoU $\uparrow$} \\
-    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
-    & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & \\
-    \midrule
-    Baseline & 0.7408 & 0.7562 & N/A & N/A & N/A \\
-    \cmidrule(lr){1-6}
-    NanoBanana Pro & 0.9216 & 0.9030 & 0.8233 & 0.7720 & 0.6067 \\
-    Qwen-Edit (Orig.) & 0.9134 & 0.9002 & 0.7772 & 0.7206 & 0.5104 \\
-    \midrule
-    Ours & \scoredelta{0.7724}{+0.0314} & \scoredelta{0.7932}{+0.0371} & 0.9104 & 0.8986 & 0.9402 \\
-    \bottomrule
-  \end{tabular}}
-  \caption{Quantitative comparison across different feedback sources.}
-  \label{tab:feedback_comparison}
-\end{table*}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/plots/nfe_dino_iou.png}
-  \caption{Sensitivity of RED (NFE): trade-off between DINO Sim and Mask IoU.}
-  \label{fig:red_sensitivity}
-\end{figure}
-
-\textbf{Analysis and Conclusion}:
-\begin{enumerate}
-    \item \textbf{Why RED as the Feedback}: Compared with NanoBanana and original Qwen-Image-Edit, RED preserves geometry significantly better while maintaining competitive semantic alignment. This property is crucial in 3D training because geometric drift in pseudo-GT views leads to conflicting multi-view gradients.
-    \item \textbf{Choice of Guidance Scale}: Experiments show that excessively high CFG (e.g., 12) severely damages image quality, leading to drops in both CLIP and IoU. \textbf{Cfg=4} demonstrated the most robust performance, effectively enhancing conceptual features while maintaining high geometric consistency (IoU > 0.97).
-    \item \textbf{Critical Role of Timestep Ratio}: We found that the starting point of the editing interval is more critical than the total number of steps. Comparing \textbf{Steps: 20|40 (Ratio 0.5)} and \textbf{Steps: 30|40 (Ratio 0.75)}, the latter brought nearly a \textbf{7x} improvement in CLIP (+0.0228 vs +0.0034). This indicates that at low noise levels like $t=0.5$, the image structure is solidified, and the model lacks sufficient \textbf{plasticity} to inject new concepts. Therefore, we fix the \textbf{Ratio to 0.75} to ensure sufficient editing freedom.
-    \item \textbf{Efficiency-Quality Trade-off}: Given a Ratio of 0.75, we compared high-step (30|40) and low-step (9|12) strategies. Although 30|40 yielded slightly higher conceptual improvement, its Mask IoU dropped significantly (0.93), increasing the risk of geometric drift. In contrast, \textbf{Steps: 9|12} maintained extremely high geometric stability (\textbf{IoU $\sim$0.96}) while still achieving competitive conceptual enhancement, with a \textbf{70\%} reduction in computational cost.
-\end{enumerate}
-
-Based on the above analysis, we adopt the configuration \textbf{(Steps: 9|12, Cfg=4)} in all subsequent 3D experiments.
+  \begin{subfigure}[b]{\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{\detokenize{figures/OREO Ratio.drawio.png}}
+    \caption{Effect of Editing Ratio ($N_e/N$)}
+  \end{subfigure}
+  \par\smallskip
+  \begin{subfigure}[b]{\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{\detokenize{figures/OREO Visualization.drawio.png}}
+    \caption{Effect of Editing Steps ($N_e$)}
+  \end{subfigure}
+  \caption{Qualitative ablation study on RE parameters. (a) \textbf{Editing Ratio}: A low ratio (e.g., 0.25) limits editing capability, while a full ratio (1.0) destroys the original structure. Our choice of 0.75 strikes a balance. (b) \textbf{Editing Steps}: Increasing steps from 9 to 30 yields negligible visual improvement, confirming the efficiency of our setting.}
+  \label{fig:ablation_vis}
+\end{figure*}
 
 \subsection{Main Results}
 
@@ -444,22 +466,21 @@ To deeply understand the contribution of each component of OREO, we conducted a 
 \end{figure*}
 
 
-\textbf{Analyzing Loss Components.}
-We verified the necessity of each part of the Contrastive Distillation Loss (CDL).
-\begin{itemize}
-    \item \textbf{Replace CDL with MSE}: We attempted to directly minimize the mean squared error ($\| x^{\texttt{src}} - x^{\texttt{tgt}} \|^2$) between the rendered image and the final output of FlowEdit. Results showed that although this strategy could quickly close the conceptual distance, it easily led to geometric distortion (e.g., uneven surfaces). This is because MSE forces the model to match the editing results at the pixel level, ignoring inevitable minor geometric deviations during the 2D editing process. In contrast, CDL utilizes relative gradient directions, providing more robust conceptual guidance.
-    \item \textbf{Remove Repeller Term ($\| x^{\texttt{src}} - \hat{x}^{-}_{t \to 0} \|^2$)}: Retaining only the attractor term led to the model overfitting the editing target, ignoring the suppression of the unconditional distribution, resulting in generated textures that were too smooth and lacked detail.
-\end{itemize}
+\textbf{Effectiveness of Reinforced Editing.}
+We first validate the necessity of using Reinforced Editing (RE) to construct pseudo-GTs.
+As shown in Fig.~\ref{fig:ablation_overview}, directly using standard FlowEdit without our modifications (i.e., w/o differential velocity and noise update) leads to severe geometric inconsistencies, as the editor tends to hallucinate new structures or change the viewpoint.
+In contrast, OREO with full RE successfully injects realistic details while strictly preserving the original geometry, providing reliable supervision for the 3D generator.
 
-\textbf{Sampling Strategy Analysis.}
-To balance training efficiency and performance, we adopted Multi-step Time Sampling (MTS Sampling).
-\begin{itemize}
-    \item \textbf{Fixed Timestep}: If optimization is performed only at a fixed noise level (e.g., $t=500$), the model struggles to handle diverse input distributions, resulting in insufficient texture detail after convergence.
-    \item \textbf{MTS Sampling (Ours)}: To address the overfitting problem caused by fixed timesteps, we adopted a \textbf{Stratified Random Sampling} strategy. Unlike solving ODEs on a fixed discrete grid, we divide the entire time axis into continuous sub-intervals and uniformly sample a time step from each sub-interval in each iteration. This strategy ensures that the model covers continuous noise levels while maintaining the correctness of the Global Flow Trajectory, significantly enhancing robustness to minor time shifts.
-\end{itemize}
+\textbf{Impact of Regularization.}
+We also analyze the role of the regularization term $\mathcal{L}_{reg}$.
+Without regularization, the generator may overfit to high-frequency artifacts in the pseudo-GTs, leading to noisy surfaces.
+Adding $\mathcal{L}_{reg}$ effectively smooths the geometry and ensures that the optimization trajectory remains close to the plausible 3D manifold.
 
 \section{Conclusion}
-This paper proposes \textbf{OREO}, a general post-training framework for 3D concept design scenarios. Addressing the generalization bottleneck of existing 3D generative models when handling highly stylized and non-standard geometric inputs, we innovatively introduce an enhanced editing mechanism based on FlowEdit. By constructing a \textbf{Contrastive Distillation Loss}, OREO successfully distills the rich conceptual priors contained in 2D foundation models into 3D generators. Experimental results show that our method significantly outperforms supervised baselines in conceptual consistency, geometric fidelity, and texture detail, providing an efficient new path for solving the data scarcity problem in 3D generation.
+This paper proposes \textbf{OREO}, a fidelity alignment framework for 3D generation.
+Addressing the lack of visual realism in existing 3D models, we introduce an on-the-fly optimization loop that leverages 2D diffusion priors.
+At its core, we propose Reinforced Editing to generate structure-preserving pseudo-GTs, which serve as dynamic supervision targets.
+Experimental results demonstrate that OREO effectively enhances the visual fidelity and texture details of 3D generators while maintaining geometric integrity, offering a scalable solution to bridge the gap between 3D geometry and 2D visual realism.
 
 \textbf{Future Work.} Although OREO performs well, there is still room for further exploration. First, the current FlowEdit process has high inference costs; future work could explore more efficient distillation strategies (e.g., one-step editing). Second, we will attempt to extend OREO to more complex scene generation tasks, utilizing panoramic editing models to optimize large-scale 3D environments. Finally, combining with Large Multimodal Models (LMM) for more fine-grained interactive editing is also an exciting direction.
 
