@@ -12,6 +12,11 @@
 \definecolor{eccvblue}{rgb}{0.12,0.49,0.85}
 \usepackage[pagebackref,breaklinks,colorlinks,citecolor=eccvblue]{hyperref}
 
+\newif\ifshowreviewtags
+\showreviewtagstrue
+\newcommand{\reviewtag}[1]{\ifshowreviewtags{\textcolor{eccvblue}{\scriptsize [#1]}}\fi}
+\newcommand{\reviewstatus}[1]{\ifshowreviewtags{\par\vspace{0.5mm}\noindent\parbox{\linewidth}{\raggedright\textcolor{red}{\scriptsize [Unanswered / unchecked: #1]}}\par\vspace{0.8mm}}\fi}
+
 \def\paperID{153}
 \def\confName{ECCV}
 \def\confYear{2026}
@@ -29,20 +34,20 @@ We sincerely thank all reviewers for their constructive comments. We will revise
 
 \vspace{-2mm}
 \section*{To Reviewer \#1}
-\vspace{-2mm}
+\reviewstatus{R1-Min2}
 
-\noindent{\em\textbf{Q1. Evaluation on only a small-scale collected dataset.}}
+\noindent{\em\textbf{Q1. Evaluation on only a small-scale collected dataset.}} \reviewtag{R1-Maj1, R1-Sug1, R2-Maj4, R2-Sug2}
 We further evaluate on the full GSO dataset (1,029 objects) and observe consistent improvement (CLIP: 0.6712$\rightarrow$0.6766, DINO: 0.5915$\rightarrow$0.5972). 
 The smaller margin than on our Conceptual Design Dataset is expected, as GSO covers everyday scanned objects already within Trellis's training distribution. 
 OREO is designed for out-of-domain concept images where the quality gap is the largest.
 
-\noindent{\em\textbf{Q2. Missing comparisons with stronger distillation / 2D-to-3D baselines.}}
+\noindent{\em\textbf{Q2. Missing comparisons with stronger distillation / 2D-to-3D baselines.}} \reviewtag{R1-Maj2, R1-Sug2}
 Our current baselines focus on feed-forward generation and a concurrent image-to-3D pipeline, but we agree that the comparison should include optimization/distillation methods using strong 2D priors. We will add comparisons or carefully matched references to representative methods such as ProlificDreamer and Magic3D, and clarify which methods are prompt-specific optimization methods versus feed-forward generator post-training methods. This distinction matters because OREO targets post-training a generator, not per-prompt 3D optimization.
 
-\noindent{\em\textbf{Q3. Dependence on Qwen-Image-Edit and missing failure analysis.}}
+\noindent{\em\textbf{Q3. Dependence on Qwen-Image-Edit and missing failure analysis.}} \reviewtag{R1-Maj4, R1-Sug4}
 OREO uses Qwen-Image-Edit as a 2D prior, so its failures can propagate to the supervision signal. We will explicitly discuss typical failure modes, including hallucinated geometry, over-edited textures, and edits that conflict with the target view. We will also add editing instruction examples and failure cases in the supplementary material to make this dependency transparent.
 
-\noindent{\em\textbf{Q4. Computational overhead and human evaluation.}}
+\noindent{\em\textbf{Q4. Computational overhead and human evaluation.}} \reviewtag{R1-Maj3, R1-Min1, R1-Sug3, R1-Sug4, R3-Clar2}
 The main overhead comes from the multi-step editing solver inside the training loop, while the generator update remains a standard differentiable rendering/decoding pass. We will report wall-clock time and peak VRAM in the revision. We also conducted a human preference study comparing OREO against Trellis and Photo3D on reference fidelity and texture detail; results are shown in Table~\ref{tab:human_eval}. OREO is consistently preferred, confirming perceptually superior concept-design fidelity.
 \begin{table}[h]
 \vspace{-2mm}
@@ -62,34 +67,34 @@ Texture Detail     & 68\% & 59\% \\
 
 \vspace{-2mm}
 \section*{To Reviewer \#2}
-\vspace{-2mm}
+\reviewstatus{none}
 
-\noindent{\em\textbf{Q1. Missing related work on 3D/2D generation and editing pipelines.}}
+\noindent{\em\textbf{Q1. Missing related work on 3D/2D generation and editing pipelines.}} \reviewtag{R2-Maj1, R2-Maj1a, R2-Maj1b, R2-Maj1c, R2-Maj1d}
 Thank you for pointing out these related works. We will add and discuss Image Sculpting, DiffEditor, Mvdrag3d, and GeoDiffusion in the related work. We will clarify that these works mainly study object editing, multi-view editing/reconstruction, or training-free conditioning, whereas OREO uses an on-the-fly rendering-editing loop to post-train a feed-forward 3D generator.
 
-\noindent{\em\textbf{Q2. Limited qualitative results, low figure resolution, and readability.}}
+\noindent{\em\textbf{Q2. Limited qualitative results, low figure resolution, and readability.}} \reviewtag{R2-Maj2, R2-Min1, R3-Qual1, R3-Qual3}
 We agree that the current qualitative evidence is too compressed to fully judge high-fidelity texture and cross-view consistency. The revision will include a high-resolution appendix with enlarged front/side/back views, more examples, and zoomed-in regions for fine details. We will also highlight the important areas in figures so that the reader can more easily interpret the visual differences.
 
-\noindent{\em\textbf{Q3. Dataset details are insufficient; a second dataset should be used.}}
+\noindent{\em\textbf{Q3. Dataset details are insufficient; a second dataset should be used.}} \reviewtag{R2-Maj3, R2-Maj4, R2-Sug1, R2-Sug2}
 We will provide the full construction procedure of the collected data, including image sources, filtering criteria, prompt generation, and train/test splits. As discussed in Reviewer~\#1 Q1, we also evaluate on the full GSO dataset (1,029 objects) to complement our Conceptual Design Dataset with a public benchmark.
 
 \vspace{-2mm}
 \section*{To Reviewer \#3}
-\vspace{-2mm}
+\reviewstatus{none; R3-Sug1 is covered by R3 Q1--Q4}
 
-\noindent{\em\textbf{Q1. Insufficient qualitative evidence for multi-view 3D consistency.}}
+\noindent{\em\textbf{Q1. Insufficient qualitative evidence for multi-view 3D consistency.}} \reviewtag{R3-Qual1}
 We agree that the current paper does not show enough large-scale multi-view results, especially because the side views in Fig.~5 are small. We will add high-resolution multi-view visualizations in the supplementary material and enlarge representative side/back views in the main revision. These results will focus on whether the edited texture improvements remain consistent under viewpoint changes.
 
-\noindent{\em\textbf{Q2. Hard-to-interpret ablation results.}}
+\noindent{\em\textbf{Q2. Hard-to-interpret ablation results.}} \reviewtag{R3-Qual2}
 The reviewer is correct. 
 Our experiments used a minimal prompt ``rotate the camera'' to isolate the viewpoint change; however, this leaves the color unconstrained, allowing the 2D base model to introduce color shifts, which our classifier-guided noise update faithfully propagates and amplifies. 
 We found that adding a background constraint such as ``white background'' in the prompt helps preserve foreground color consistency and further improves the 3D generation quality, with full results included in the revision. 
 Across the full dataset, noise update remains essential for structural and textural fidelity, improving CLIP/DINO from 0.7235/0.7343 to 0.7501/0.7629.
 
-\noindent{\em\textbf{Q3. Explanation of Eq.~7 and negative source guidance is unclear.}}
+\noindent{\em\textbf{Q3. Explanation of Eq.~7 and negative source guidance is unclear.}} \reviewtag{R3-Clar1}
 Eq.~7 implements a contrastive edit direction: the target branch is pulled toward the edited target reference, while the source branch contributes an opposing guidance term so the optimization does not simply copy source-view appearance or alter the underlying geometry. Intuitively, the negative source guidance suppresses changes that explain the source rendering rather than the desired target edit. We will rewrite Sec.~3.3 with this explanation and add a visualization of the intermediate FlowEdit steps.
 
-\noindent{\em\textbf{Q4. Computational cost, Qwen prompts, and typos.}}
+\noindent{\em\textbf{Q4. Computational cost, Qwen prompts, and typos.}} \reviewtag{R3-Clar2, R3-Clar3, R3-Min1, R3-Min2}
 We will report the extra runtime and VRAM introduced by backpropagating through the differentiable renderer/decoder and by the editing solver. We will also include concrete Qwen-Image-Edit instruction templates, such as preserving object shape while enhancing target-view texture and realism. Finally, we will fix the reported typos, enlarge compressed figures, and provide the missing prompt examples in the supplement.
 
 \end{document}

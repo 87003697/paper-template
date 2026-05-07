@@ -144,23 +144,13 @@ Generative methods like Instant3D~\cite{li2024instant3d} and Trellis~\cite{xiang
 Despite their efficiency, these feed-forward models often struggle with texture details due to the limited quality of 3D training data.
 As 3D generation has shifted from optimization-based pipelines to large-scale pretraining, post-training has become the key stage for adapting generic priors to target objectives. Recent 3D-native foundations are first pretrained on large synthetic 3D corpora~\cite{xiang2025structured,zhao2025hunyuan3d,ye2025hi3dgen,li2025triposg,guo2025hyper3d,yushi2025gaussiananything}, and then further tuned with task-specific data to improve geometric stability and appearance controllability. From a pipeline perspective, post-training is typically performed in either geometry--texture coupled or decoupled frameworks~\cite{chen20253dtopia,xiang2025structured,yushi2025gaussiananything,lin2025diffsplat,zhao2025hunyuan3d,ye2025hi3dgen,li2025triposg,li2025step1x,guo2025hyper3d,zhang2025bang}. A notable concurrent work, Photo3D~\cite{photo3d}, adopts an offline decoupled post-training strategy to enhance texture details using 2D diffusion priors. Since it does not use adaptive pseudo-GT supervision during optimization, its performance is more dependent on the prepared training data. In contrast, OREO performs on-the-fly editing to provide adaptive pseudo-GT guidance, improving fidelity while maintaining semantic consistency.
 
-\noindent\textbf{Lifting 2D Priors for 3D Generation.}
-Leveraging the rich knowledge of 2D diffusion models~\cite{rombach2022high} to guide 3D generation has become a dominant paradigm.
-Early works like DreamFusion~\cite{poole2022dreamfusion} and Magic3D~\cite{lin2023magic3d} employ Score Distillation Sampling (SDS) to optimize a NeRF per scene.
-While effective, SDS often suffers from over-saturation and the Janus problem.
-Subsequent works like ProlificDreamer~\cite{wang2024prolificdreamer} introduce Variational Score Distillation (VSD) to improve fidelity, yet they remain computationally expensive due to the per-scene optimization requirement.
-Another line of work focuses on distilling 2D priors into feed-forward 3D models~\cite{hong2023lrm,tang2024lgm}.
-However, these methods typically rely on static 3D datasets rendered into 2D images, limited by the dataset's native quality.
-In contrast, OREO establishes a dynamic loop where the 2D prior actively refines the generator's own outputs, allowing the model to surpass the quality of its original training data without the cost of per-scene optimization.
-
-\noindent\textbf{Diffusion-based Image Editing.}
-Image editing aims to modify specific attributes while preserving the original content.
-Early attention-based methods~\cite{hertz2022prompt,parmar2023zero} manipulate cross-attention maps but often struggle with precise local control.
-Inversion-based approaches~\cite{mokady2023null,udandarao2023sus} map the image back to the noise space to preserve structure, but this process is time-consuming and prone to reconstruction errors.
-Recently, instruction-based methods like InstructPix2Pix~\cite{brooks2023instructpix2pix} have gained popularity but rely heavily on paired training data.
-More relevant to our work are inversion-free editing methods based on Flow Matching, such as FlowEdit~\cite{couairon2024flowedit} and RF-Inversion~\cite{zhang2024rfinversion}.
-These methods couple source and target trajectories for efficient editing.
-However, directly applying them to 3D rendering often leads to geometric drift, where the edited view deviates from the underlying 3D mesh. Our Reinforced Editing addresses this by introducing a structure-preserving guidance mechanism within the flow trajectory.
+\noindent\textbf{Diffusion-based Image Editing and 2D-to-3D Prior Transfer.}
+Diffusion-based image editing modifies visual attributes while preserving content structure.
+Methods range from attention manipulation~\cite{hertz2022prompt,parmar2023zero}, inversion-based reconstruction~\cite{mokady2023null,udandarao2023sus}, to instruction-driven editing~\cite{brooks2023instructpix2pix}.
+More recently, inversion-free approaches based on Flow Matching, such as FlowEdit~\cite{couairon2024flowedit} and RF-Inversion~\cite{zhang2024rfinversion}, couple source and target trajectories for efficient editing without costly noise-space inversion.
+However, directly applying these methods to 3D renderings often leads to geometric drift, where the edited view deviates from the underlying mesh.
+Leveraging 2D diffusion priors~\cite{rombach2022high} for 3D generation has been explored through score distillation~\cite{poole2022dreamfusion,lin2023magic3d,wang2024prolificdreamer}, which optimizes a NeRF per scene but suffers from slow inference and artifacts, and through feed-forward distillation~\cite{hong2023lrm,tang2024lgm}, which is limited by the quality ceiling of static 3D datasets.
+OREO bridges both directions: it employs a structure-preserving editing mechanism within a dynamic optimization loop, allowing the 2D prior to actively refine the generator's own outputs without per-scene optimization or static dataset constraints.
 
 \section{Method}
 \label{sec:method}
