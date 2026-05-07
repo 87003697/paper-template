@@ -1,3 +1,4 @@
+% !TEX root = rebuttal.tex
 \documentclass[10pt,twocolumn,letterpaper]{article}
 
 \usepackage[rebuttal]{cvpr}
@@ -92,8 +93,20 @@ Prompts such as ``keep consistent foreground colors'' can reduce this color shif
 We therefore use a less restrictive prompt in the main setting, where the full method achieves better overall quantitative scores.
 We will clarify this trade-off in the revision.
 
-\noindent{\em\textbf{Q3. Explanation of Eq.~7 and negative source guidance is unclear.}} \reviewtag{R3-Clar1}
-Eq.~7 implements a contrastive edit direction: the target branch is pulled toward the edited target reference, while the source branch contributes an opposing guidance term so the optimization does not simply copy source-view appearance or alter the underlying geometry. Intuitively, the negative source guidance suppresses changes that explain the source rendering rather than the desired target edit. We will rewrite Sec.~3.3 with this explanation and add a visualization of the intermediate FlowEdit steps.
+\noindent{\em\textbf{Q3. Explanation of Eq.~7 is unclear.}} \reviewtag{R3-Clar1}
+Thank you for pointing this out.
+The negative source branch in Eq.~7 acts as an auxiliary regularizer, stabilizing reference-guided editing.
+The intermediate steps in Fig.~\ref{fig:neg_src_traj} show that removing it causes unstable global color changes and weaker local structures.
+We will expand Sec.~3.3 with this discussion and visualization.
+
+\begin{figure}[h]
+\vspace{-1mm}
+\centering
+\includegraphics[width=\linewidth]{figures_rebuttal/view_edit_traj/test_09.png}
+\caption{Intermediate editing trajectories with/without negative source guidance.}
+\label{fig:neg_src_traj}
+\vspace{-3mm}
+\end{figure}
 
 \noindent{\em\textbf{Q4. Computational cost and edit prompts.}} \reviewtag{R3-Clar2, R3-Clar3, R3-Min1, R3-Min2}
 Thank you for the suggestions.
