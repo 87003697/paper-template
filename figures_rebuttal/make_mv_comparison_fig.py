@@ -2,7 +2,7 @@
 Create a SV3D-style multi-view comparison figure for rebuttal R3-Qual1.
 
 Rows:
-  Input / Trellis / OREO
+  Input / Trellis / Photo3D / OREO
 
 Columns:
   00250: three selected novel views
@@ -19,13 +19,14 @@ from PIL import Image, ImageDraw, ImageFont
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "mv_comparison"
+PHOTO3D_DIR = BASE_DIR / "mv_comparison_photo3d"
 OUT_PATH = BASE_DIR / "mv_comparison_00250_04198_03360.png"
 
 CELL = 220
 PAD = 8
 ROW_LABEL_W = 130
-SAMPLE_HEADER_H = 34
-VIEW_HEADER_H = 28
+SAMPLE_HEADER_H = 0
+VIEW_HEADER_H = 0
 ROW_H = CELL
 BG = (255, 255, 255)
 LINE = (205, 205, 205)
@@ -33,7 +34,11 @@ TEXT = (30, 30, 30)
 SUBTEXT = (85, 85, 85)
 INPUT_BG = (246, 246, 246)
 TRELLIS_BG = (238, 242, 250)
+PHOTO3D_BG = (241, 246, 239)
 OREO_BG = (247, 238, 231)
+ZOOM_BORDER = (210, 45, 45)
+ZOOM_INSET = 72
+BIRD_ZOOM_BOX = (112, 8, 196, 92)
 
 # sample_id, display_name, [(semantic view, view index), ...]
 SAMPLES = [
@@ -45,6 +50,7 @@ SAMPLES = [
 ROWS = [
     ("Input", INPUT_BG),
     ("Trellis", TRELLIS_BG),
+    ("Photo3D", PHOTO3D_BG),
     ("OREO", OREO_BG),
 ]
 
@@ -115,6 +121,28 @@ def fit_image(path, box_w, box_h, crop=True):
     return canvas.convert("RGB")
 
 
+def add_zoom_inset(img, crop_box, inset_size=ZOOM_INSET, position="lower_right"):
+    """Overlay a magnified crop in a cell image."""
+    out = img.copy()
+    draw = ImageDraw.Draw(out)
+    zoom = img.crop(crop_box).resize((inset_size, inset_size), Image.LANCZOS)
+    if position in ("lower_left", "upper_left"):
+        inset_x = 6
+    else:
+        inset_x = img.width - inset_size - 6
+    if position == "upper_left":
+        inset_y = 6
+    else:
+        inset_y = img.height - inset_size - 6
+    out.paste(zoom, (inset_x, inset_y))
+    draw.rectangle(
+        (inset_x, inset_y, inset_x + inset_size, inset_y + inset_size),
+        outline=ZOOM_BORDER,
+        width=3,
+    )
+    return out
+
+
 def draw_centered_text(draw, text, box, font, fill=TEXT):
     x0, y0, x1, y1 = box
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -144,27 +172,10 @@ def main():
         draw.rectangle((0, y, fig_w, y + ROW_H), fill=row_bg)
         draw_centered_text(draw, row_name, (0, y, ROW_LABEL_W, y + ROW_H), FONT_ROW)
 
-    # Sample headers, view headers, and cells.
+    # View headers and cells.
     x = ROW_LABEL_W + PAD
     for sample_id, sample_name, views in SAMPLES:
         sample_dir = DATA_DIR / sample_id
-        draw_centered_text(
-            draw,
-            sample_name,
-            (x, y_sample_header, x + group_w, y_sample_header + SAMPLE_HEADER_H),
-            FONT_SAMPLE,
-        )
-
-        # View labels.
-        for view_idx, (view_name, _) in enumerate(views):
-            vx = x + view_idx * (CELL + PAD)
-            draw_centered_text(
-                draw,
-                view_name,
-                (vx, y_view_header, vx + CELL, y_view_header + VIEW_HEADER_H),
-                FONT_VIEW,
-                fill=SUBTEXT,
-            )
 
         # Input row: condition image centered across the three-view group.
         input_y = y_rows
@@ -172,17 +183,40 @@ def main():
         canvas.paste(input_img, (x, input_y))
         draw.rectangle((x, input_y, x + group_w, input_y + ROW_H), outline=LINE, width=1)
 
-        # Trellis and OREO rows use paired single-view renders.
+        # Method rows use paired single-view renders.
         for view_idx, (_, view_id) in enumerate(views):
             vx = x + view_idx * (CELL + PAD)
 
             trellis_y = y_rows + 1 * (ROW_H + PAD)
             trellis_img = fit_image(sample_dir / f"v{view_id}_teacher.png", CELL, ROW_H, crop=True)
+            if sample_id == "04198" and view_idx == 0:
+                trellis_img = add_zoom_inset(trellis_img, BIRD_ZOOM_BOX, position="upper_left")
+            if sample_id == "03360" and view_idx == 0:
+                trellis_img = add_zoom_inset(
+                    trellis_img, (112, 70, 160, 154), position="upper_left"
+                )
             canvas.paste(trellis_img, (vx, trellis_y))
             draw.rectangle((vx, trellis_y, vx + CELL, trellis_y + ROW_H), outline=LINE, width=1)
 
-            oreo_y = y_rows + 2 * (ROW_H + PAD)
+            photo3d_y = y_rows + 2 * (ROW_H + PAD)
+            photo3d_img = fit_image(PHOTO3D_DIR / f"{sample_id}_v{view_id}_student.png", CELL, ROW_H, crop=True)
+            if sample_id == "04198" and view_idx == 0:
+                photo3d_img = add_zoom_inset(photo3d_img, BIRD_ZOOM_BOX, position="upper_left")
+            if sample_id == "03360" and view_idx == 0:
+                photo3d_img = add_zoom_inset(
+                    photo3d_img, (106, 70, 154, 154), position="upper_left"
+                )
+            canvas.paste(photo3d_img, (vx, photo3d_y))
+            draw.rectangle((vx, photo3d_y, vx + CELL, photo3d_y + ROW_H), outline=LINE, width=1)
+
+            oreo_y = y_rows + 3 * (ROW_H + PAD)
             oreo_img = fit_image(sample_dir / f"v{view_id}_student.png", CELL, ROW_H, crop=True)
+            if sample_id == "04198" and view_idx == 0:
+                oreo_img = add_zoom_inset(oreo_img, BIRD_ZOOM_BOX, position="upper_left")
+            if sample_id == "03360" and view_idx == 0:
+                oreo_img = add_zoom_inset(
+                    oreo_img, (106, 70, 154, 154), position="upper_left"
+                )
             canvas.paste(oreo_img, (vx, oreo_y))
             draw.rectangle((vx, oreo_y, vx + CELL, oreo_y + ROW_H), outline=LINE, width=1)
 
