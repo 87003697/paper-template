@@ -60,12 +60,13 @@ isProject: false
 - **目标**：补充相关工作，并在不增加定量实验的前提下，清晰阐明设定差异。
 - **正文与附录分工**：
   - **正文（`camera_ready.tex`）**：
-    - 在 `Related Work` 章节中补充对 3D/2D editing pipelines 的讨论。
-    - 简洁说明 Magic3D/ProlificDreamer 等基于 per-scene optimization 的 text-to-3D 方法与本文 feed-forward image-to-3D post-training 的设定差异，保留 DMD 作为 score-distillation 风格的合理对照。
-    - **BibTeX 规范**：使用标准 canonical BibTeX 条目（在对话中提供给用户，并引导其填入 `main.bib`）：
-      - Instruct-NeRF2NeRF: `\cite{instructnerf2023}`
-      - GaussianEditor (CVPR 2024): `\cite{chen2024cvpr-gaussianeditor}`
-      - DreamEditor (SIGGRAPH Asia 2023): `\cite{zhuang2023dreameditor}`
+    - 已将 `Related Work` 重构为三段结构：
+      - `Learning-based 3D Generation and Generator Post-training`：从 3D-native foundations 的 fidelity gap 出发，引出将 2D diffusion priors 的 high-fidelity appearance prior 迁移到 3D 生成模型。
+      - `2D Image Editing for Fidelity-Enhancing Supervision`：说明 edited views 应提升 visual fidelity 且保持 camera viewpoint / structure；覆盖 training-based editors、training-free / inversion-based / inversion-free editing。
+      - `2D Priors for 3D Editing and Generation`：覆盖 3D editing / geometry-conditioned editing 与 score-distillation 迁移路线，并澄清 OREO 与 per-scene optimization / text-to-3D baseline 的设定差异。
+    - 已补充并引用 Reviewer #2 关心的 2D/3D editing 相关工作：InstructPix2Pix、MagicBrush、Emu Edit、UltraEdit、Prompt-to-Prompt、Null-text Inversion、FlowEdit、RF-Inversion、Instruct-NeRF2NeRF、DreamEditor、GaussianEditor、DFFSplat、Image Sculpting、MvDrag3D、GeoDiffusion。
+    - 已明确 Magic3D / ProlificDreamer 属于 optimization-based text-to-3D，和 OREO 的 learning-based image-to-3D generator post-training 设置不同；DMD 更接近 generator-learning 范式，因此保留为 score-distillation 消融基线，但与 OREO 的 explicit edited-view pseudo-GT / online pixel-level supervision 不同。
+    - **BibTeX 状态**：上述引用均已存在于 `main.bib`，正文已使用实际 key（如 `haque2023instruct`, `wang2024gaussianeditor`, `koh2026diffusion`, `yenphraphai2024image`, `chen2024mvdrag3d`, `chen2024geodiffusion`）。最终 `camera_ready.log` 无 undefined citation/reference。
   - **附录（`supplementary.tex`）**：
     - 无需此内容。
 

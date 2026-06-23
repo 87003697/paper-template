@@ -64,7 +64,7 @@
 - ✅ Image Sculpting — `yenphraphai2024image` 已存在。
 - ✅ MvDrag3D — `chen2024mvdrag3d` 已存在。
 - ✅ GeoDiffusion — `chen2024geodiffusion` 已存在。
-- **正文 key 对齐提醒**：当前 `camera_ready.tex` 里仍可能存在 `\cite{instructnerf2023}`、`\cite{chen2024cvpr-gaussianeditor}`、`\cite{koh2025dffsplat}` 等旧 key；落正文时需统一替换为 `haque2023instruct`、`wang2024gaussianeditor`、`koh2026diffusion`。
+- ✅ **正文 key 已对齐**：`camera_ready.tex` 已统一使用 `haque2023instruct`、`wang2024gaussianeditor`、`koh2026diffusion` 等 `main.bib` 实际 key；最终编译日志无 undefined citation/reference。
 
 ### 第三段：2D-to-3D prior transfer / baseline clarification
 - ✅ DreamFusion — `poole2022dreamfusion` 与 `poole2023dreamfusion` 都存在；正文建议统一用一个键名，优先用当前正文已有键名。
@@ -78,19 +78,19 @@
 - [x] Step 2: 对 `camera_ready.tex` 中的 Related Work 章节进行三段式重构：第一段说明 3D-native generator 的 fidelity gap，第二段说明如何构造 high-fidelity 且 structure-aligned 的 edited views，第三段说明 2D priors 在 3D editing / generation 中的已有迁移方式及其局限。
 - [x] Step 3: 进行编译检查，确保没有引入 LaTeX 语法错误。
 
-## Code Diff
+## 最终实现摘要
 
-#### `camera_ready.tex` (+22/-17)
+#### `camera_ready.tex` Related Work
+- **第一段**：改为从 learning-based 3D-native foundations 切入，强调合成 3D 数据相对真实 2D 图像在规模与多样性上的不足，进而引出 visual fidelity / texture / realism 的提升空间。
+- **第二段**：聚焦 `2D Image Editing for Fidelity-Enhancing Supervision`，说明 high-quality edited views 既要提升 visual fidelity，也要保持 camera viewpoint / structure；training-based editors 提供外观增强但可能引入结构误差，inversion-free editing 更适合作为构造 structure-aligned edited views 的基础。
+- **第三段**：聚焦 `2D Priors for 3D Editing and Generation`，用 3D editing / geometry-conditioned editing 说明已有方法多为 per-scene optimization；用 DreamFusion / Magic3D / ProlificDreamer / DMD 说明 score-distillation 路线，并区分 DMD 的合理消融地位与 OREO 的 explicit pseudo-GT / online pixel-level supervision。
+- **引用 key**：全部使用 `main.bib` 实际存在的 key，例如 `haque2023instruct`、`wang2024gaussianeditor`、`koh2026diffusion`、`yenphraphai2024image`、`chen2024mvdrag3d`、`chen2024geodiffusion`。
 
-```diff
-@@ Related Work — 三段论大一统结构重写 @@
-\noindent\textbf{Learning-based 3D Generation and Generator Post-training.}
-Recent years have witnessed significant progress in 3D generation, shifting from traditional optimization-based methods to rapid and generalizable learning-based approaches~\cite{hong2023lrm,tang2024lgm,tochilkin2024triposr}.
-Typically, state-of-the-art learning-based models train 3D-native foundations~\cite{xiang2025structured,zhao2025hunyuan3d,ye2025hi3dgen,li2025triposg,guo2025hyper3d,yushi2025gaussiananything,chen20253dtopia,lin2025diffsplat,li2025step1x,zhang2025bang} to synthesize 3D assets in a single forward pass.
-However, these models are predominantly trained on synthetic 3D datasets such as Objaverse~\cite{deitke2023objaverse}, which suffer from limited data scale and simplified texture details.
-In contrast, 2D diffusion models are pre-trained on billions of diverse real-world images, capturing an exceptionally broad data distribution with rich appearance details. This vast data volume can effectively compensate for the scarcity of high-quality 3D training assets.
-To bridge this domain and scale gap, a straightforward solution is to leverage the robust image editing capabilities of 2D diffusion priors to refine 3D generator outputs with realistic details. To systematically incorporate such 2D editing priors, generator post-training has emerged as an under-explored yet highly promising paradigm. To this end, we introduce OREO, a learning-based generator post-training framework that aligns pre-trained 3D generators with realistic texture distributions.
-```
+## 验证
+- `ReadLints(camera_ready.tex)`：无 linter errors。
+- `latexmk -pdf -interaction=nonstopmode -halt-on-error camera_ready.tex`：成功。
+- `pdflatex -interaction=nonstopmode -halt-on-error camera_ready.tex`：最终 pass 成功。
+- `camera_ready.log`：无 undefined citation / undefined reference。
 
 ## 状态
 **当前阶段**: Done (Related Work Consolidatively Merged and defensive logic closed-loop)
