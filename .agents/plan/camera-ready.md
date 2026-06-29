@@ -10,22 +10,22 @@ todos:
     status: completed
   - id: problem-2-gan-loss
     content: 在 camera_ready.tex 中引入 GAN loss（Adversarial Loss）公式与交替训练逻辑，并在 Experiments 中补充消退说明与 Supplementary 对比
-    status: pending
+    status: completed
   - id: problem-3-negative-branch
-    content: 在 camera_ready.tex 中补充 negative source branch 理论解释（控制在 3-4 句），并在 supplementary.tex 中插入轨迹对比图与分析
-    status: pending
+    content: 在 camera_ready.tex 中补充 negative source branch 理论解释（追加 1 句），并在 supplementary.tex 中插入轨迹对比图与分析
+    status: completed
   - id: problem-4-toy4k
-    content: 在 camera_ready.tex 中以独立紧凑的 Table 2 插入 Toy4K 定量评估结果，并保持术语严格对齐
-    status: pending
+    content: 在 supplementary.tex 中加入 Toy4K 定量评估表与协议说明，并在 camera_ready.tex 中保留一句紧凑指引
+    status: completed
   - id: problem-5-human-study
     content: 在 camera_ready.tex 中插入人评核心结论，并在 supplementary.tex 中写入完整人评评判标准与多维度细节
-    status: pending
+    status: completed
   - id: problem-6-overhead-dataset
     content: 在 camera_ready.tex 中补充精简计算开销与数据集统计，并在 supplementary.tex 中写入详细 breakdown、prompts、以及判别器网络架构
     status: pending
   - id: problem-7-limitations
     content: 在 camera_ready.tex 中补充 Limitations 讨论，并在 supplementary.tex 中写入 Failure Cases 分析
-    status: pending
+    status: completed
   - id: problem-8-page-limit
     content: 迁移 Fig. 5（及备用 Fig. 7）至 supplementary.tex，并进行文字精简与排版微调，确保正文控制在 14 页以内
     status: pending
@@ -74,21 +74,31 @@ isProject: false
 
 ### 问题 2：在 Method 中引入 GAN loss（Adversarial Loss）与实验消退验证
 - **现状**：现有的 Method 中仅包含基于 MSE 的 pseudo-GT 像素级监督与 $L_{\text{reg}}$ 正则化。在大尺度 3D 渲染与生成中，仅依靠 MSE 监督容易导致局部纹理过度平滑（over-smoothed），缺失高频逼真细节。
-- **目标**：在 Method 的 `Generator Optimization via Pseudo-GT Supervision`（Sec. 3.4）中引入对抗损失（GAN Loss），提升纹理的高频保真度和画质，并在 Experiments 中进行论述，同时在 Supplementary 中补全定性对比，形成完整的学术闭环。
+- **目标**：在 Method 的 `Generator Optimization via Pseudo-GT Supervision`（Sec. 3.4）中引入对抗损失（GAN Loss），提升纹理的高频保真度和画质；在当前缺少 `w/o GAN loss` 定量/定性素材的前提下，正文不编造消融数字，仅做保守实验说明，并在 Supplementary 中预留判别器细节与后续定性对比位置。
 - **正文与附录分工**：
   - **正文（`camera_ready.tex`）**：
     - **公式化表达**：引入一个 Discriminator $D_\psi$，以 $x^{\texttt{tgt}}$ 作为真实样本，以渲染图 $x^{\texttt{src}}$ 作为虚假样本。为了避免训练初期的梯度消失，Adversarial Loss 采用非饱和目标：
       $$\mathcal{L}_{\text{adv}}(G_\theta) = -\mathbb{E}_{x^{\texttt{src}}} \left[ \log D_\psi(x^{\texttt{src}}) \right]$$
-      和 Discriminator 的训练损失 $\mathcal{L}_{\text{disc}}(D_\psi)$。
+      和 Discriminator 的训练损失：
+      $$\mathcal{L}_{\text{disc}}(D_\psi) =
+      -\mathbb{E}_{x^{\texttt{tgt}}}[\log D_\psi(x^{\texttt{tgt}})]
+      -\mathbb{E}_{x^{\texttt{src}}}[\log(1-D_\psi(x^{\texttt{src}}))]$$
     - **总损失函数更新**：更新 $\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{sup}} + \lambda \mathcal{L}_{\text{reg}} + \gamma \mathcal{L}_{\text{adv}}$。
     - **文字解释与流程图/算法更新**：
-      - 在正文 `Sec. 3.4` 的对应位置插入 GAN loss 的理论动机（对抗训练促使 Generator 生成高频逼真纹理）。
-      - 微调 `Algorithm 2 (Closed-loop Optimization)`，补充 Discriminator $D_\psi$ 的交替优化更新步骤。
+      - 在正文 `Sec. 3.4` 的对应位置插入 GAN loss 的理论动机：$\mathcal{L}_{\text{sup}}$ 提供 pixel-level pseudo-GT 对齐，$\mathcal{L}_{\text{reg}}$ 保持几何稳定，$\mathcal{L}_{\text{adv}}$ 缓解 MSE 监督的过平滑倾向并鼓励高频真实纹理。
+      - 微调 `Algorithm 2 (Closed-loop Optimization)`：在 `Require` 中加入 $D_\psi$ 与判别器学习率；每轮先用 $x^{\texttt{tgt}}$ 作为 real、$x^{\texttt{src}}$ 作为 fake 更新 $D_\psi$，再用 $\mathcal{L}_{\text{sup}} + \lambda \mathcal{L}_{\text{reg}} + \gamma \mathcal{L}_{\text{adv}}$ 更新 $G_\theta$。
     - **消退闭环验证（实验关联）**：
-      - 在正文消退分析（`Sec. 4.3`）中，使用 2-3 句文字对 GAN Loss 的高频细节增益进行论述，说明不加 GAN Loss 时的过度平滑现象。
+      - 在正文消退分析（`Sec. 4.3`）中只加入保守说明：完整 OREO 使用 adversarial refinement 来缓解 pixel loss 的 over-smoothing，判别器设计与后续可视化见 Supplementary。
+      - **当前不新增 `w/o GAN loss` 表格行或具体视觉结论**，因为目前没有对应的定量指标或定性图，避免无依据实验陈述。
   - **附录（`supplementary.tex`）**：
-    - **判别器网络架构**：提供判别器 $D_\psi$ 的架构细节（PatchGAN 感受野、卷积层通道数等）和对抗训练超参数（$\gamma$ 权重，lr 设定等）。
-    - **定性对比大图**：开辟专门章节展示有/无 GAN Loss 的高精局部渲染对比图。
+    - **判别器网络架构**：在 `Implementation and Dataset Details` 下新增 `Adversarial Training Details` 小节，说明 $D_\psi$ 为 PatchGAN-style image discriminator，real/fake 定义分别为 $x^{\texttt{tgt}}$ / $x^{\texttt{src}}$，并记录非饱和目标、$\gamma$ 权重、学习率、更新频率等实现细节。
+    - **定性对比预留**：新增 `Qualitative Effect of Adversarial Loss` 小节，用于后续插入有/无 GAN Loss 的局部纹理对比图；若图尚未提供，仅保留占位，不撰写具体结果。
+- **执行步骤**：
+  - [ ] Step 1: 更新 `Algorithm 2 (Closed-loop Optimization)`，加入 $D_\psi$ 与交替优化步骤。
+  - [ ] Step 2: 更新 `Sec. 3.4`，加入 $\mathcal{L}_{\text{adv}}$、$\mathcal{L}_{\text{disc}}$ 与新的 $\mathcal{L}_{\text{total}}$。
+  - [ ] Step 3: 更新 `Sec. 4.3` 的消融入口文字，保守说明 GAN loss 的作用边界，不新增无数据支撑的表格项。
+  - [ ] Step 4: 更新 `supplementary.tex`，加入 adversarial training details 与定性对比占位。
+  - [ ] Step 5: 编译 `camera_ready.tex` 与 `supplementary.tex`，检查 equation / algorithm / reference 是否正常。
 
 ---
 
@@ -97,36 +107,38 @@ isProject: false
 - **目标**：在正文中进行理论澄清（极致精炼），在 Supplementary 中提供直观的轨迹对比图。
 - **正文与附录分工**：
   - **正文（`camera_ready.tex`）**：
-    - 在 `Sec. 3.3` 的公式 `red_diff_velocity` 附近，补充对 negative source branch 物理意义的简洁文字解释。**控制在 3-4 句内**以节省篇幅：“The negative source branch pushes the latent representation away from unconditioned states, suppressing semantic hallucinations and locking the underlying geometric structure during 2D guidance.”
+    - 已在 `Sec. 3.3` 的公式 `red_diff_velocity` 后保留原解释并追加 1 句说明：negative source branch 的 auxiliary regularizing effect 可在 Supplementary 轨迹图中直观看到；移除该分支会出现 color over-saturation / weaker local structures。
   - **附录（`supplementary.tex`）**：
-    - 插入 `figures_rebuttal/comparison_grid.png`，并对有/无负引导的轨迹表现差异（如颜色过饱和、细节丢失、结构变化等）进行成因分析。
+    - 已新增 `Analysis of Negative Source Guidance` 小节，插入 `figures_rebuttal/comparison_grid.png`，分析有/无 negative source guidance 的 intermediate editing trajectory，重点解释 color over-saturation、unstable global color changes、weaker local structures，以及 helmet “A” 缺失。
 
 ---
 
 ### 问题 4：Toy4K 定量评估缺失
 - **现状**：rebuttal 中承诺补充在 Toy4K 数据集上的定量评估结果。
-- **目标**：在正文中呈现 Toy4K 核心指标，增强实验说服力.
+- **目标**：在 Supplementary 中呈现 Toy4K 核心指标与评估协议，增强实验说服力，同时避免正文新增表格占页。
 - **正文与附录分工**：
   - **正文（`camera_ready.tex`）**：
-    - **严禁与 Table 1 合并**：因指标类型不符，明文禁止两表合并，避免表头混乱。
-    - **建立独立 Table 2**：在 `Sec. 4.2 Main Results` 中加入一个独立的、紧凑的单栏表格 `Table 2`（呈现 CLIP, $FD_{\text{inc}}$, $FD_{\text{dino}}$, $KD_{\text{dino}}$ 指标）。
-    - **命名严格一致**：方法名称在 Table 2、Table 1 以及主文中必须严格保持一致：`Pretrained` 或 `Pretrained (Trellis)`，`Photo3D`，`OREO (Ours)` 以及消退变体 `w/o Noise Update`。
+    - 不新增 Toy4K 表格，只在 `Sec. 4.2 Main Results` 的定量段落后加入一句紧凑指引：Toy4K 官方 Trellis protocol 的完整 benchmark results 与 metric details 见 Supplementary。
+    - 避免正文新增 Table 2，保留当前正文表格编号与页数控制空间。
   - **附录（`supplementary.tex`）**：
-    - 无需此内容。
+    - 在 `Implementation and Dataset Details` 下新增 `Benchmark Evaluation on Toy4K` 小节。
+    - 放置独立 Toy4K 定量表（CLIP, $FD_{\text{inc}}$, $FD_{\text{dino}}$, $KD_{\text{dino}}$），复用 rebuttal 数值。
+    - 解释 Toy4K 是 Trellis 官方评估协议下的标准 benchmark / test set，并说明各指标含义。
+    - 方法命名严格一致：`Pretrained (Trellis)`，`Photo3D`，`OREO (Ours)`，`w/o Noise Update`。
 
 ---
 
-### 问题 5：Human Preference Study（人评）细节与结果
+### 问题 5：Human Preference Study（人评）细节与结果 [已完成]
 - **现状**：rebuttal 中承诺补充人评结果，但主文空间极度紧张。
 - **目标**：在正文中给出人评的核心结论，并在 Supplementary 中提供完整细节。
 - **正文与附录分工**：
   - **正文（`camera_ready.tex`）**：
-    - 用 1-2 句简短文字总结人评核心胜出率（OREO 41% vs Photo3D 36% vs Pretrained 23%），并用 `\cite` 标注完整细节见 Supplementary。
+    - 在 `Qualitative Evaluation` 段末尾加入 1 句：`A human preference study further confirms OREO's visual advantage, with full details in the Supplementary Material.`
+    - 不修改 Toy4K 指引，正文不写具体百分比。
   - **附录（`supplementary.tex`）**：
-    - 详尽展开人评细节：
-      - 评判维度：Fidelity（多视角材质与细节）、Consistency（多视角 3D 一致性）、Identity（参考图还原度）。
-      - 参与者信息：20名参与者（包括 3D 重建与图形学领域专业学者占比）。
-      - 统计检验与样本划分（100个样本等）。
+    - 已将 `Human Preference Study Protocols` 占位替换为正式协议，覆盖 study setup、evaluation criteria、participants 和 aggregate results。
+    - 新增 `tab:human_preference`，报告 Pretrained/Trellis 23%、Photo3D 36%、OREO 41%。
+    - 当前没有 per-sample/per-participant raw ballots，因此只报告 aggregate preference ratios，不写 p-value / confidence interval / 显著性检验。
 
 ---
 
