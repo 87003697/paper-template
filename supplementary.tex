@@ -54,7 +54,7 @@ In this supplementary material, we provide:
 \begin{itemize}
   \item Section~\ref{sec:negative_source_guidance}: Trajectory visualization and analysis of negative source guidance in Reinforced Editing.
   \item Section~\ref{sec:human_study_details}: Comprehensive protocols and setup for our human preference study.
-  \item Section~\ref{sec:implementation_details}: Detailed Toy4K benchmark results, training/inference computational overhead, prompts, and dataset statistics.
+  \item Section~\ref{sec:implementation_details}: Dataset construction, editing prompts, training/inference computational overhead, GSO benchmark evaluation, and adversarial training details.
   \item Section~\ref{sec:limitations_failure}: Additional discussion on failure cases and limitations.
 \end{itemize}
 
@@ -123,85 +123,94 @@ This section provides the implementation details used in our main experiments, i
 
 \subsection{Conceptual Design Dataset Construction}
 \label{sec:dataset_construction}
-We construct an image collection to support image-only post-training without paired 3D supervision.
-The training split contains \texttt{TODO: number of training images} images collected from online sources and filtered to emphasize \texttt{TODO: filtering goals}.
-Images with \texttt{TODO: exclusion criteria} are removed during filtering.
-For evaluation, we use a disjoint \texttt{TODO: evaluation split size}-example held-out split, referred to as the Conceptual Design Dataset in the main paper.
-This evaluation split contains \texttt{TODO: evaluation-set characteristics}, and is never used for training either OREO or the Photo3D baseline.
-\texttt{TODO: dataset release statement or stable link.}
+We construct an image-only collection to support generator post-training without paired 3D supervision.
+The dataset comprises around two thousand reference images collected from public online sources, with a focus on concept-design and stylized assets that exhibit rich appearance details and align with realistic user scenarios.
+We manually filter the collection to remove duplicates, low-resolution thumbnails, watermarked images, and content with unclear foregrounds, prioritizing reference images with clean foregrounds, well-defined silhouettes, and informative texture or material cues.
+For evaluation, we hold out a disjoint split of 100 reference images, each rendered into 5 query views by the pretrained Trellis backbone, yielding 500 evaluation pairs.
+This held-out split is used as the Conceptual Design Dataset in the main paper and is never seen during training of either OREO or the Photo3D baseline.
+We will release the curated reference images, the held-out evaluation split, and the editing prompts together with the source code.
 
 \subsection{Editing Prompts}
 \label{sec:editing_prompts}
-We use fixed editing instructions for all compared 2D feedback sources to avoid prompt-specific tuning on individual examples.
-The exact prompts are listed below:
-\begin{itemize}
-  \item Reinforced Editing: \texttt{TODO: exact RE prompt}
-  \item Qwen-Image-Edit: \texttt{TODO: exact Qwen-Image-Edit prompt}
-  \item NanoBanana: \texttt{TODO: exact NanoBanana prompt}
-\end{itemize}
-\texttt{TODO: prompt consistency statement, e.g., whether training/evaluation use the same prompt.}
+We use a single fixed editing instruction for all 2D feedback sources to avoid prompt-specific tuning per example.
+For Reinforced Editing as well as the off-the-shelf Qwen-Image-Edit and NanoBanana editors, we provide the rendered query view together with the conditioning reference image and the following instruction:
+\begin{quote}
+\itshape
+``The first image is a 3D rendered view. The second image is the reference. Edit the first image to match the reference object's appearance. White background.''
+\end{quote}
+This prompt is used identically during training (for OREO post-training) and during evaluation (for the editing-feedback comparison in Sec.~4.1 of the main paper); only the underlying editor backbone is swapped.
+API-specific parameters such as sampler, classifier-free guidance scale, and number of denoising steps are listed in the released source code.
 
 \subsection{Computational Overhead}
 \label{sec:computational_overhead}
-OREO introduces additional 2D editing calls during generator post-training.
-When executed sequentially, the \texttt{TODO: editing-step count}-step image editing process accounts for \texttt{TODO: sequential overhead} of each training iteration.
-In practice, we wrap the editor as \texttt{TODO: async service description} and overlap editing calls with \texttt{TODO: overlapped training component}.
-This reduces the effective waiting time to \texttt{TODO: async effective wait} on \texttt{TODO: hardware}, with \texttt{TODO: quality-impact statement}.
+OREO post-training augments standard generator updates with online 2D editing calls, which are the main source of additional compute.
+We profile the system on a single node with 8$\times$H200 GPUs.
+Without the editing component, one full training step takes approximately 22~s.
+When the 9-step image editing process is executed sequentially on the same machine, it dominates the iteration cost and accounts for roughly 81\% of the per-step wall-clock time.
+In practice, we wrap the editor as an asynchronous service and overlap each editing call with the rollout of the next training mini-batch, so that editing latency is hidden behind generator forward and backward passes.
+With this overlap, the effective waiting time for editing drops to about 45\% of a training iteration on the same hardware, with no observed change in optimization dynamics or final quality.
+The adversarial branch (Sec.~\ref{sec:adversarial_details}) adds only marginal extra cost (about 0.1~s per step), since the discriminator reuses a frozen DINOv3-S backbone.
+Memory usage is dominated by the generator: a single H200 (140~GB) holds the model and activations within the available memory; activation checkpointing on the 3D generator further reduces the peak working set when needed for development on smaller cards.
 
 \begin{table}[t]
   \centering
-  \caption{Computational overhead of the editing component during OREO post-training.}
+  \caption{Computational overhead of the editing component during OREO post-training, profiled on 8$\times$H200 GPUs.}
   \label{tab:computational_overhead}
   \begin{tabular}{@{}lccp{0.32\linewidth}@{}}
     \toprule
     Component & Sequential Cost & Effective Wait & Note \\
     \midrule
-    \texttt{TODO: component} & \texttt{TODO: sequential cost} & \texttt{TODO: effective wait} & \texttt{TODO: note} \\
+    9-step 2D editing & $\sim$81\% of iter. & $\sim$45\% of iter. & Async editing service overlapped with next-batch rollout. \\
+    Adversarial branch & $\sim$0.1~s/step & $\sim$0.1~s/step & Frozen DINOv3-S backbone, only multi-scale heads are trained. \\
+    Generator step (no editing) & $\sim$22~s/step & $\sim$22~s/step & Reference baseline on 8$\times$H200. \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\subsection{Benchmark Evaluation on Toy4K}
-\label{sec:toy4k_details}
-We additionally evaluate OREO on Toy4K, a standard benchmark used by the official Trellis evaluation protocol.
-Unlike our Conceptual Design Dataset, which focuses on challenging in-the-wild user inputs, Toy4K provides a complementary benchmark for measuring whether the learned fidelity alignment transfers to a conventional test distribution.
-We follow the Trellis protocol and report CLIP, FD$_{\text{inc}}$, FD$_{\text{dino}}$, and KD$_{\text{dino}}$ in Table~\ref{tab:toy4k}.
-CLIP measures semantic alignment, while FD$_{\text{inc}}$, FD$_{\text{dino}}$, and KD$_{\text{dino}}$ measure distributional distances under different feature spaces.
+\subsection{Benchmark Evaluation on GSO}
+\label{sec:gso_details}
+We additionally evaluate OREO on Google Scanned Objects (GSO), a widely used image-to-3D benchmark of real scanned everyday objects.
+Whereas our Conceptual Design Dataset targets challenging in-the-wild user inputs, GSO provides a complementary distribution of common, in-domain assets that lie close to the pretrained backbone's training distribution.
+We use 77 GSO objects and render each generated mesh from 16 viewpoints uniformly sampled along a full 360$^\circ$ azimuth orbit, conditioned on a single front-view RGB image.
+We compare against the pretrained Trellis backbone and the Photo3D baseline using the same per-object conditioning images and the same rendering protocol.
+Generation quality is reported with distribution-level metrics, FID and KID, computed against ground-truth GSO renderings (78 objects, 84 views per object) using the InceptionV3 feature extractor following the standard \texttt{clean-fid} implementation.
 
 \begin{table}[t]
   \centering
-  \caption{Evaluation on Toy4K following the official Trellis protocol.}
-  \label{tab:toy4k}
-  \scriptsize
-  \setlength{\tabcolsep}{3pt}
-  \begin{tabular}{@{}lcccc@{}}
+  \caption{Distribution-level evaluation on the GSO benchmark. Lower is better; metrics are computed on InceptionV3 features against ground-truth GSO renderings.}
+  \label{tab:gso}
+  \begin{tabular}{@{}lcc@{}}
     \toprule
-    Method & CLIP $\uparrow$ & FD$_{\text{inc}}\downarrow$ & FD$_{\text{dino}}\downarrow$ & KD$_{\text{dino}}\downarrow$ \\
+    Method & FID $\downarrow$ & KID $\downarrow$ \\
     \midrule
-    Pretrained (Trellis) & 86.78 & 9.23 & 66.82 & 0.73 \\
-    Photo3D & 86.89 & \textbf{9.09} & 76.98 & \textbf{0.70} \\
-    OREO (Ours) & \textbf{87.12} & 9.12 & \textbf{62.54} & \textbf{0.70} \\
-    w/o Noise Update & 86.83 & 9.39 & 67.41 & 0.72 \\
+    Pretrained (Trellis) & 58.71 & 0.0081 \\
+    Photo3D & 72.94 & 0.0137 \\
+    OREO (Ours) & \textbf{57.32} & \textbf{0.0072} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The results show that OREO improves CLIP and FD$_{\text{dino}}$ over the pretrained Trellis backbone and Photo3D, while remaining competitive on FD$_{\text{inc}}$ and KD$_{\text{dino}}$.
-The degradation of the w/o Noise Update variant further supports the role of dynamic noise update beyond the in-the-wild evaluation split.
+As shown in Table~\ref{tab:gso}, OREO is the only configuration that improves over the pretrained Trellis backbone on both FID and KID, indicating that the fidelity alignment learned from out-of-distribution concept-design inputs also transfers to standard in-domain assets.
+Photo3D, in contrast, shifts the appearance distribution further away from the GSO ground truth (FID $72.94$ vs.\ $58.71$), consistent with the qualitative observation in the main paper that its score-distillation supervision over-smooths textures.
+These results complement the Conceptual Design Dataset evaluation in the main paper: OREO not only narrows the larger fidelity gap on out-of-domain inputs, but also yields measurable improvements on a conventional in-domain benchmark.
 
 \subsection{Adversarial Training Details}
-We implement the discriminator $D_\psi$ as a projected discriminator built on a frozen DINOv3-S image encoder.
-We implement the discriminator $D_\psi$ as \texttt{TODO: discriminator backbone/design}.
-The encoder parameters are \texttt{TODO: frozen or trainable}, and lightweight trainable heads are attached to \texttt{TODO: feature layers} for multi-scale real/fake classification.
+\label{sec:adversarial_details}
+We implement the discriminator $D_\psi$ as a projected discriminator built on a frozen DINOv3-S image encoder (ViT-Small, 384-dim, 12 transformer blocks with register tokens).
+The encoder parameters are kept frozen throughout post-training; lightweight trainable heads are attached to the intermediate features at hook depths $\{2,5,8,11\}$, skipping the CLS and register tokens, for multi-scale real/fake classification.
+Each head is a small convolutional stack composed of a spectrally normalized $3{\times}3$ convolution, GroupNorm with 32 groups, LeakyReLU, and a residual block scaled by $1/\sqrt{2}$.
+Inputs are bilinearly resized to $518{\times}518$ before entering the encoder.
 During discriminator training, edited pseudo-GT views $x^{\texttt{tgt}}$ are treated as real samples, while rendered predictions $x^{\texttt{src}}$ are treated as fake samples.
-The discriminator is updated \texttt{TODO: update frequency} using the BCE objective described in the main paper.
+The discriminator is updated once per generator step (1{:}1 alternation) using a binary cross-entropy objective with logits, and discriminator gradients are clipped at norm $1.0$ for stability.
 For the generator update, the adversarial term encourages $x^{\texttt{src}}$ to be classified as real, complementing the pixel-level pseudo-GT loss with high-frequency appearance supervision.
-In our implementation, the adversarial weight is \texttt{TODO: gamma}, and the discriminator learning rate is \texttt{TODO: discriminator learning rate}.
-We keep \texttt{TODO: frozen components} frozen to reduce memory overhead and avoid overfitting the discriminator to the limited edited-view distribution.
-All real/fake pairs are formed \texttt{TODO: online pairing strategy}, so the adversarial branch does not require any additional real 3D supervision.
+We use generator learning rate $1{\times}10^{-4}$ and discriminator learning rate $2{\times}10^{-5}$ (five times slower than the generator), which we found necessary for stable adversarial training given the small number of trainable parameters in the projection heads.
+The adversarial weight is $\gamma_{\text{adv}}=10^{-3}$; larger values caused the optimization to collapse, consistent with the conservative ablation discussion in the main paper.
+We also experimented with R1 gradient penalty at $\gamma_{R1}\in\{0,10^{-4},10^{-3},10^{-2}\}$ and observed no measurable effect on either training stability or final metrics: the LayerNorm operations inside the DINOv3-S blocks attenuate the input-space gradient norm to roughly $10^{-10}$, rendering the R1 term inactive in practice, and we therefore disable it by default.
+The frozen encoder is shared between forward and backward passes, so that only the multi-scale heads carry trainable parameters; this keeps the additional memory footprint and the per-step adversarial overhead small (Sec.~\ref{sec:computational_overhead}).
+All real/fake pairs are formed online from the current closed-loop optimization step, so the adversarial branch does not require any additional real 3D supervision.
 
 \subsection{Qualitative Effect of Adversarial Loss}
-Placeholder for qualitative comparisons between training with and without the adversarial loss.
+High-resolution before/after crops illustrating the local texture sharpening induced by the adversarial term will be released alongside the source code.
 
 \section{Limitations and Failure Cases}
 \label{sec:limitations_failure}

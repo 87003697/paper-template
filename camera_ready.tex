@@ -52,22 +52,22 @@
 \titlerunning{OREO: Fidelity Alignment in 3D Generation}
 
 \author{Zhiyuan Ma\inst{1} \and
-Wenbo Hu\inst{2} \and
-Wang Zhao\inst{2} \and
+Wenbo Hu\inst{2}\textsuperscript{\dag} \and
+Wang Zhao\inst{2} \and\\
 Pengfei Wang\inst{1} \and
 Ying Shan\inst{2} \and
-Lei Zhang\inst{1}}
+Lei Zhang\inst{1}\textsuperscript{\dag}}
 
 \authorrunning{Z. Ma et al.}
 % First names are abbreviated in the running head.
 % If there are more than two authors, 'et al.' is used.
 
-\institute{Department of Computing, The Hong Kong Polytechnic University\\
-\email{zm2354.ma@connect.polyu.hk}
+\institute{Department of Computing, The Hong Kong Polytechnic University
 \and
 Tencent ARC Lab}
 
 \maketitle
+\let\thefootnote\relax\footnotetext{\textsuperscript{\dag}Corresponding authors}
 
 
 \begin{abstract}
@@ -77,6 +77,7 @@ Tencent ARC Lab}
   At its core, we introduce Reinforced Editing, which utilizes a 2D model to refine rendered views of the 3D output, injecting realistic textures and fine-grained details while preserving the original geometric structure.
   These refined views serve as high-quality supervision targets, enabling the 3D generator to learn from its own generated samples and progressively improve its visual quality.
   Experiments demonstrate that OREO effectively improves upon pre-trained baselines, producing 3D assets with enhanced visual realism.
+  Our project page is at \url{https://theericma.github.io/oreo/}.
   \keywords{3D Generation  \and Alignment \and Image Diffusion Prior}
 \end{abstract}
 
@@ -90,9 +91,10 @@ Tencent ARC Lab}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\textwidth]{figures_final/OREO_teaser_v0.pdf}
-  \caption{\textbf{Overview of OREO.} To enhance visual fidelity of 3D generation, the 3D generator is optimized via on-the-fly editing from a frozen 2D image generator.}
+  \includegraphics[width=0.95\textwidth]{figures_final/OREO_teaser_v0.pdf}
+  \caption{\textbf{Teaser.} To enhance visual fidelity of 3D generation, the 3D generator is optimized via on-the-fly editing from a frozen 2D image generator.}
   \label{fig:teaser}
+  \vspace{-2mm}
 \end{figure}
 
 Recent 3D generators, such as Trellis and the Hunyuan3D series, have greatly simplified the 3D content creation process.
@@ -115,7 +117,7 @@ Additionally, a geometric regularization term is employed to maintain structural
 Experiments on the state-of-the-art Trellis model demonstrate that OREO effectively improves its performance, producing 3D assets with superior visual realism.
 
 In summary, our contributions are as follows:
-\begin{enumerate}
+\begin{enumerate}\setlength{\itemsep}{0pt}
     \item We introduce OREO, a novel alignment framework that leverages pre-trained 2D diffusion priors to enhance the fidelity of 3D generators through an on-the-fly optimization loop with dynamic pseudo ground truths.
     \item We propose the Reinforced Editing algorithm, which adopts an inversion-free strategy to inject realistic textures into rendered views while prioritizing structure preservation for robust 3D optimization.
     \item We validate the effectiveness of OREO on state-of-the-art 3D generators. Results show that our method effectively improves visual realism and texture richness while preserving geometric integrity.
@@ -153,38 +155,29 @@ In contrast, OREO explicitly constructs high-fidelity, structure-aligned edited 
 
 We present OREO, an alignment framework that enhances 3D visual fidelity via on-the-fly optimization.
 An overview of the full pipeline is illustrated in Fig.~\ref{fig:pipeline}.
-On the left, a frozen pre-trained generator $G_{\theta_{pre}}$ performs an ODE rollout to produce a clean 3D latent $z_0$ from a reference image $x^{\texttt{ref}}$.
-Gaussian noise is then injected to obtain $z_t$, from which the trainable velocity field $v_\theta$ predicts the denoised latent $\hat{z}_0$.
-The result is decoded and projected through a differentiable renderer to yield a 2D view $x^{\texttt{src}}$.
-On the right, Reinforced Editing transforms $x^{\texttt{src}}$ into a high-fidelity pseudo ground truth $x^{\texttt{tgt}}$.
-As shown in the vector diagram, the editing is driven by a differential velocity $\tilde{v}$ that couples a positive guidance term $v_\phi^{w}$ (pulling toward the reference-conditioned score) with a negative guidance term $v_\phi^{-w}$ (pushing away from the unconditional score), injecting realistic details while neutralizing structural drift.
-Meanwhile, the shared noise $\epsilon$ is dynamically updated at each step by $\tilde{v}_c(1-t)$ to stabilize the editing trajectory.
-Finally, the discrepancy between $x^{\texttt{src}}$ and $x^{\texttt{tgt}}$ is back-propagated through the renderer to update the generator, closing the optimization loop.
-We detail the problem formulation in Sec.~\ref{sec:problem_formulation}, preliminaries in Sec.~\ref{sec:preliminaries}, the Reinforced Editing algorithm in Sec.~\ref{sec:reinforced_editing}, and the closed-loop optimization in Sec.~\ref{sec:optimization}.
+\textcolor{red}{We leverage a pre-trained 2D editing model to construct pseudo ground truths on the fly, overcoming the inability to train without 3D ground-truth supervision.}
+\textcolor{red}{Specifically, the generator performs on-policy sampling to obtain a denoised 3D asset at an intermediate step, which is then rendered into a 2D view from a sampled camera pose, as detailed in Sec.~\ref{sec:preliminaries}.}
+\textcolor{red}{We then apply the image editing prior with our proposed Reinforced Editing in Sec.~\ref{sec:reinforced_editing} to enhance the view, improving visual fidelity while preserving structural consistency.}
+\textcolor{red}{Finally, using the enhanced view as a dynamic supervision signal, the training method in Sec.~\ref{sec:optimization} distills the fidelity improvement back into the 3D generator.}
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\textwidth]{figures/OREO_pipeline_v2.drawio.png}
-  \caption{\textbf{Overview of OREO.} We establish a closed-loop optimization cycle where the 3D generator learns from its own rendered outputs. (Left) The generator predicts a denoised asset, which is rendered into a 2D view $x^{\texttt{src}}$. (Right) \textit{Reinforced Editing}, transforms $x^{\texttt{src}}$ into a high-fidelity target $x^{\texttt{tgt}}$ by coupling positive and negative guidance terms, injecting realistic details while preserving structure, detailed in Sec.~\ref{sec:reinforced_editing}. Finally, $x^{\texttt{tgt}}$ serves as a pseudo-GT to supervise $x^{\texttt{src}}$, guiding the generator update.}
+  \includegraphics[width=\textwidth,trim=80 0 80 0,clip]{figures_final/OREO_pipeline_v3.drawio.pdf}
+  \caption{\textbf{Overview of OREO.} We establish a closed-loop optimization cycle where the 3D generator learns from its own rendered outputs. (Left) The generator predicts a denoised asset, which is rendered into a 2D view $x^{\texttt{src}}$. (Right) \textit{Reinforced Editing}, transforms $x^{\texttt{src}}$ into a high-fidelity target $x^{\texttt{tgt}}$ by coupling \textcolor{red}{a positive guidance term with an unconditional source anchor}, injecting realistic details while preserving structure, detailed in Sec.~\ref{sec:reinforced_editing}. Finally, $x^{\texttt{tgt}}$ serves as a pseudo-GT to supervise $x^{\texttt{src}}$, guiding the generator update.}
   \label{fig:pipeline}
 \end{figure}
 
 \subsection{Problem Formulation}
 \label{sec:problem_formulation}
-Given a reference image $x^{\texttt{ref}}$, our goal is to optimize a 3D generator $G_\theta$ to synthesize high-fidelity 3D assets.
-We employ a differentiable renderer $\mathcal{P}$ to project generated assets into 2D views from arbitrary camera poses $\pi$.
-Rather than relying on 3D ground truths, we leverage a pre-trained 2D editor $\mathcal{E}_\phi$ to refine $x^{\texttt{src}}$ into a higher-fidelity target $x^{\texttt{tgt}}$.
-The optimization objective is formulated as:
+\textcolor{red}{Given a reference image $x^{\texttt{ref}}$, the 3D generator $G_\theta$ produces an asset that is projected into a 2D view $x^{\texttt{src}} = \mathcal{P}(G_\theta(x^{\texttt{ref}}), \pi)$ via a differentiable renderer $\mathcal{P}$ under camera pose $\pi$.}
+\textcolor{red}{A pre-trained 2D editor $\mathcal{E}_\phi$ then enhances this view into a higher-fidelity target $x^{\texttt{tgt}} = \mathcal{E}_\phi(x^{\texttt{src}}, x^{\texttt{ref}})$.}
+\textcolor{red}{The generator is optimized by minimizing the discrepancy between the two:}
 \begin{equation}
 \label{eq:task}
 \theta^* = \arg\min_\theta \mathbb{E}_{x^{\texttt{ref}}, \pi}
 \left[\mathcal{L}(x^{\texttt{src}}, x^{\texttt{tgt}})\right]
 \end{equation}
-\[
-x^{\texttt{src}} = \mathcal{P}(G_\theta(x^{\texttt{ref}}), \pi), \quad
-x^{\texttt{tgt}} = \mathcal{E}_\phi(x^{\texttt{src}}, x^{\texttt{ref}})
-\]
-where $\mathcal{L}$ is a supervision loss that encourages better visual fidelity.
+\textcolor{red}{where $\mathcal{L}$ is a supervision loss that encourages improved visual fidelity.}
 
 
 \subsection{Preliminaries}
@@ -211,16 +204,16 @@ Similarly, we use $x$ and $\phi$ for the 2D editor $v_\phi$, where $\mathcal{E}_
 
 
 \textbf{Inversion-Free Image Editing.}
-We leverage FlowEdit, an inversion-free method that modifies images by coupling source and target flow trajectories.
+We leverage FlowEdit~\cite{couairon2024flowedit}, an inversion-free method that modifies images by coupling source and target flow trajectories.
 Starting from $x^{\texttt{src}}$, it iteratively updates the editing variable via $x^{\texttt{edit}} \leftarrow x^{\texttt{edit}} - \Delta t \cdot \tilde{v}$, where the differential velocity is defined as:
 \begin{equation}
     \label{eq:flowedit_transition}
-    \tilde{v} = v_\phi^{w_{\texttt{tgt}}}(x^{\texttt{tgt}}(t); t, c^{\texttt{tgt}}) - v_\phi^{w_{\texttt{src}}}(x^{\texttt{src}}(t); t, c^{\texttt{src}})
+    \tilde{v} = v^{\texttt{tgt}}(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{tgt}}) - v^{\texttt{src}}(\textcolor{red}{x_t^{\texttt{src}}}; t, c^{\texttt{src}})
 \end{equation}
 where the \textbf{source branch} and the \textbf{target branch} is constructed as
 \begin{equation}
     \label{eq:flowedit_states}
-    x^{\texttt{src}}(t) = (1-t)x^{\texttt{src}} + t\epsilon, \quad x^{\texttt{tgt}}(t) = x^{\texttt{edit}} + (x^{\texttt{src}}(t) - x^{\texttt{src}}), \quad \epsilon \sim \mathcal{N}(0, I).
+    \textcolor{red}{x_t^{\texttt{src}}} = (1-t)x^{\texttt{src}} + t\epsilon, \quad \textcolor{red}{x_t^{\texttt{tgt}}} = x^{\texttt{edit}} + (\textcolor{red}{x_t^{\texttt{src}}} - x^{\texttt{src}}), \quad \epsilon \sim \mathcal{N}(0, I).
 \end{equation}
 The editing process is performed over the last $N_e$ steps of the full $N$-step ODE schedule.
 With integration step size $\Delta t = t_{i-1} - t_i$, $x^{\texttt{edit}}$ evolves into $x^{\texttt{tgt}}$, which transfers the image from being consistent with $c^{\texttt{src}}$ to following $c^{\texttt{tgt}}$ without the need for costly inversion that maps the image back to noise, thereby preserving structural fidelity.
@@ -236,15 +229,15 @@ With integration step size $\Delta t = t_{i-1} - t_i$, $x^{\texttt{edit}}$ evolv
     \State Select time steps $\{t_i\}_{i=0}^{N_e}$ as the last $N_e$ steps from the full schedule of $N$ steps
     \For{$i = 0$ to $N_e-1$} \Comment{\texttt{FlowEdit: Backward Euler Integration}}
         \State $t \leftarrow t_i$, $\Delta t \leftarrow t_{i+1} - t_i$
-        \State $x^{\texttt{src}}(t) \leftarrow (1-t)x^{\texttt{src}} + t\epsilon$
-        \State $x^{\texttt{tgt}}(t) \leftarrow x^{\texttt{edit}} + (x^{\texttt{src}}(t) - x^{\texttt{src}})$ \Comment{\texttt{Eq.~\ref{eq:flowedit_states}}}
+        \State $\textcolor{red}{x_t^{\texttt{src}}} \leftarrow (1-t)x^{\texttt{src}} + t\epsilon$
+        \State $\textcolor{red}{x_t^{\texttt{tgt}}} \leftarrow x^{\texttt{edit}} + (\textcolor{red}{x_t^{\texttt{src}}} - x^{\texttt{src}})$ \Comment{\texttt{Eq.~\ref{eq:flowedit_states}}}
         
         \Statex \texttt{// Reinforced Editing (Sec.~\ref{sec:reinforced_editing})}
-        \State $\tilde{v} \leftarrow v_\phi^{w}(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi^{-w}(x^{\texttt{src}}(t); t, c^{\texttt{ref}})$ \Comment{\texttt{Eq.~\ref{eq:red_diff_velocity}}}
+        \State $\tilde{v} \leftarrow v_\phi^{w}(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - \textcolor{red}{v_\phi(\textcolor{red}{x_t^{\texttt{src}}}; t, \emptyset)}$ \Comment{\texttt{Eq.~\ref{eq:red_diff_velocity}}}
         \State $x^{\texttt{edit}} \leftarrow x^{\texttt{edit}} - \tilde{v} \Delta t$ \Comment{\texttt{FlowEdit: Euler Step}}
     
         \Statex \texttt{// Noise Update}
-        \State $\epsilon \leftarrow \epsilon - (v_\phi(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi(x^{\texttt{tgt}}(t); t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Eq.~\ref{eq:red_dynamic_noise}}}
+        \State $\epsilon \leftarrow \epsilon - (v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Eq.~\ref{eq:red_dynamic_noise}}}
     \EndFor
     \State \Return $x^{\texttt{tgt}} \leftarrow x^{\texttt{edit}}$
     \end{algorithmic}
@@ -254,28 +247,26 @@ With integration step size $\Delta t = t_{i-1} - t_i$, $x^{\texttt{edit}}$ evolv
 \subsection{Constructing On-the-fly Pseudo-GTs via Reinforced Editing}
 \label{sec:reinforced_editing}
 
-To construct the supervision target $x^{\texttt{tgt}}$, we propose Reinforced Editing, a specialized adaptation of FlowEdit designed to inject realistic details while preserving the original geometric structure.
-Unlike general-purpose editing, our goal is to enhance visual fidelity without altering the camera perspective or object pose.
-
-To achieve this, we build on the FlowEdit differential velocity in Eq.~\ref{eq:flowedit_transition} and modify the flow trajectory by applying opposite guidance scales.
-Instead of transitioning between different conditions, we use the same reference condition $c^{\texttt{ref}}$ for both the source and target branches.
-The differential velocity $\tilde{v}$ is defined as:
+\textcolor{red}{A critical step in our pipeline is transforming the rendered view $x^{\texttt{src}}$ into a high-fidelity pseudo ground truth $x^{\texttt{tgt}}$.}
+\textcolor{red}{Existing image editing models can leverage their learned priors to make rendered views more realistic, but often alter the camera perspective or object pose, as analyzed in Sec.~\ref{4_1}.}
+\textcolor{red}{We propose Reinforced Editing to enable structure-preserving enhancement on top of pre-trained editing models.}
+\textcolor{red}{Different from the original FlowEdit that transfers between separate conditions $c^{\texttt{src}}$ and $c^{\texttt{tgt}}$ in Eq.~\ref{eq:flowedit_transition}, our goal is to enhance the rendered view to better resemble a novel view of $x^{\texttt{ref}}$, where no independent $c^{\texttt{src}}$ exists.}
+\textcolor{red}{We thus guide the target branch toward $c^{\texttt{ref}} = c^{\texttt{tgt}}$ and replace the source branch with an unconditional prediction:}
 \begin{equation}
     \label{eq:red_diff_velocity}
-    \tilde{v} = v_\phi^{w}(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi^{-w}(x^{\texttt{src}}(t); t, c^{\texttt{ref}}),
+    \tilde{v} = v_\phi^{w}(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - \textcolor{red}{v_\phi(\textcolor{red}{x_t^{\texttt{src}}}; t, \emptyset)},
 \end{equation}
-By pushing away from the unconditional score via $-w$ and pulling towards the reference-conditioned score via $w$, this mechanism effectively reinforces the visual details of $c^{\texttt{ref}}$ while neutralizing structural drift, ensuring the editing variable $x^{\texttt{edit}}$ remains geometrically aligned with $x^{\texttt{src}}$.
-\textcolor{red}{This auxiliary regularizing effect is further visualized in the Supplementary Material, where removing the branch leads to color over-saturation and weaker local structures such as the missing helmet mark.}
-
+\textcolor{red}{where $v_\phi$ is the velocity field of the pre-trained 2D editor, $w$ is the classifier-free guidance scale~\cite{ho2021classifier}, and $c^{\texttt{ref}}$ encodes both the reference image $x^{\texttt{ref}}$ and a text prompt indicating a viewpoint change, as illustrated in Fig.~\ref{fig:pipeline}.}
 
 \textbf{Noise Update.}
-To reduce stochastic variance and stabilize the editing trajectory, we dynamically update the noise term $\epsilon$ at each step instead of resampling it.
-We mitigate this by updating $\epsilon$ via:
+\textcolor{red}{The editing effect may be insufficient because the shared noise $\epsilon$ in Eq.~\ref{eq:flowedit_states} is randomly sampled in each iteration, whose stochasticity can weaken the editing strength~\cite{xie2026dnaedit}.}
+\textcolor{red}{To address this, we dynamically update $\epsilon$ at each step by injecting the classifier-free guidance signal into the noise:}
 \begin{equation}
     \label{eq:red_dynamic_noise}
-    \epsilon \leftarrow \epsilon - (v_\phi(x^{\texttt{tgt}}(t); t, c^{\texttt{ref}}) - v_\phi(x^{\texttt{tgt}}(t); t, \emptyset)) \cdot (1-t)
+    \epsilon \leftarrow \epsilon - (v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, \emptyset)) \cdot (1-t)
 \end{equation}
-This update effectively injects the classifier guidance term in Eq.~\ref{eq:cfg_guidance} into the noise, reducing variance and preserving fine-grained structural details.
+\textcolor{red}{This update aligns the noise with the conditional direction, strengthening the editing effect while preserving fine-grained structural details.
+The complete procedure is summarized in Algorithm~\ref{alg:red}.}
 
 
 \begin{algorithm}[t]
@@ -363,7 +354,7 @@ We first validate the feedback quality of Reinforced Editing in Sec.~\ref{4_1}, 
 
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=\textwidth]{\detokenize{figures/OREO Edit Comparison.drawiov2.png}}
+    \includegraphics[width=\textwidth]{figures_final/OREO_Edit_Comparisonv2_cropped.pdf}
     \caption{Qualitative comparison of different 2D feedback sources used for pseudo-GT generation.}
     \label{fig:edit_comparison}
   \end{figure*}
@@ -426,6 +417,37 @@ We sample 50 rendered views from the Conceptual Design Dataset evaluation split 
 As shown in Fig.~\ref{fig:ablation_ratio_steps}(a) and Fig.~\ref{fig:ablation_vis}(a), a low ratio (0.25) leaves the result close to $x^{\texttt{src}}$ with limited detail enhancement. Conversely, a full ratio (1.0) causes severe deviations from the source view; for example, the first-row anime character is transformed into a different image with a hallucinated background and altered clothing color, leading to identity mismatch. In contrast, a ratio of 0.75 improves texture fidelity while preserving the original silhouette and viewpoint, yielding the best semantic-structure trade-off.
 Furthermore, Fig.~\ref{fig:ablation_ratio_steps}(b) and Fig.~\ref{fig:ablation_vis}(b) show that increasing steps beyond 9 produces only marginal visual gains; the outputs at 9 and 30 steps are highly similar in detail quality.
 Therefore, we adopt $N_e=9$, $N=12$ in all subsequent 3D experiments for a better quality-efficiency balance.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures_rebuttal/comparison_grid.png}
+  \caption{\textcolor{red}{\textbf{Visualization of editing trajectories with and without the source branch.}
+  Removing the source branch in Eq.~\ref{eq:red_diff_velocity} leads to progressive color over-saturation and degraded local structures. With the branch, the trajectory remains stable and fine-grained details are well preserved.}}
+  \label{fig:neg_src_guidance}
+\end{figure}
+
+\textcolor{red}{\textbf{Effect of the Source Branch.}
+As shown in Fig.~\ref{fig:neg_src_guidance}, removing the source branch in Eq.~\ref{eq:red_diff_velocity} leads to color over-saturation and structural degradation, while the full formulation stabilizes the trajectory and preserves fine details.
+Quantitatively, Table~\ref{tab:ablation_components} confirms that the source branch improves structural consistency (Mask IoU: \texttt{TODO} $\rightarrow$ \texttt{TODO}) while maintaining semantic similarity.}
+
+\begin{table}[t]
+  \centering
+  \textcolor{red}{\caption{Ablation study on key components of Reinforced Editing. We evaluate on the Conceptual Design Dataset with CLIP Similarity, DINO Similarity, and Mask IoU.}
+  \label{tab:ablation_components}
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    Variant & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & IoU $\uparrow$ \\
+    \midrule
+    Full (Ours) & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} \\
+    w/o Source Branch & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} \\
+    w/o Noise Update & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} \\
+    \bottomrule
+  \end{tabular}}
+\end{table}
+
+\textcolor{red}{\textbf{Effect of Noise Update.}
+Removing the dynamic noise update (Eq.~\ref{eq:red_dynamic_noise}) weakens the editing strength, as the randomly sampled noise introduces stochasticity that dilutes the conditional guidance signal.
+As shown in Table~\ref{tab:ablation_components}, the noise update improves \texttt{TODO}, confirming its role in strengthening the editing effect.}
 
 
 \begin{figure*}[t]
