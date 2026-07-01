@@ -44,6 +44,15 @@
 
 \usepackage{hyperref}
 
+% Loosen float placement so figures land on or near their referring page.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.75}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
+
 \begin{document}
 
 % ---------------------------------------------------------------
@@ -51,7 +60,7 @@
 
 \titlerunning{OREO: Fidelity Alignment in 3D Generation}
 
-\author{Zhiyuan Ma\inst{1} \and
+\author{Zhiyuan Ma\inst{1,2} \and
 Wenbo Hu\inst{2}\textsuperscript{\dag} \and
 Wang Zhao\inst{2} \and\\
 Pengfei Wang\inst{1} \and
@@ -62,7 +71,7 @@ Lei Zhang\inst{1}\textsuperscript{\dag}}
 % First names are abbreviated in the running head.
 % If there are more than two authors, 'et al.' is used.
 
-\institute{Department of Computing, The Hong Kong Polytechnic University
+\institute{The Hong Kong Polytechnic University
 \and
 Tencent ARC Lab}
 
@@ -74,8 +83,7 @@ Tencent ARC Lab}
   Despite recent advancements in 3D generation, models often struggle to produce assets with high visual fidelity.
   To bridge this gap, we propose OREO, an alignment framework that enhances the realism of 3D generators by leveraging rich 2D diffusion priors.
   Instead of relying on static datasets, OREO establishes a dynamic optimization loop that produces on-the-fly pseudo ground truths.
-  At its core, we introduce Reinforced Editing, which utilizes a 2D model to refine rendered views of the 3D output, injecting realistic textures and fine-grained details while preserving the original geometric structure.
-  These refined views serve as high-quality supervision targets, enabling the 3D generator to learn from its own generated samples and progressively improve its visual quality.
+  At its core, OREO combines two components: (i) Reinforced Editing, which uses an image editor to refine rendered views of the 3D output, improving the visual fidelity of rendered views while preserving geometric structure; and (ii) Contrastive Distillation, which treats the edited views as positive and the original renderings as negative anchors, distilling the fidelity gap into the 3D generator via a latent contrastive objective.
   Experiments demonstrate that OREO effectively improves upon pre-trained baselines, producing 3D assets with enhanced visual realism.
   Our project page is at \url{https://theericma.github.io/oreo/}.
   \keywords{3D Generation  \and Alignment \and Image Diffusion Prior}
@@ -89,15 +97,15 @@ Tencent ARC Lab}
 \section{Introduction}
 \label{sec:intro}
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
   \centering
-  \includegraphics[width=0.95\textwidth]{figures_final/OREO_teaser_v0.pdf}
-  \caption{\textbf{Teaser.} To enhance visual fidelity of 3D generation, the 3D generator is optimized via on-the-fly editing from a frozen 2D image generator.}
+  \includegraphics[width=0.95\textwidth]{figures_final/OREO_teaser_v0.drawio.pdf}
+  \caption{\textbf{Teaser.} To enhance visual fidelity of 3D generation, our framework first \textcolor{ForestGreen}{reinforces} rendered views via image editing, then distills the gap back to the training generator with a \textcolor{red}{latent contrastive} objective. Detailed workflow in Fig.~\ref{fig:pipeline}.}
   \label{fig:teaser}
   \vspace{-2mm}
 \end{figure}
 
-Recent 3D generators, such as Trellis and the Hunyuan3D series, have greatly simplified the 3D content creation process.
+Recent 3D generators, such as Trellis~\cite{xiang2025structured} and the Hunyuan3D series~\cite{yang2024hunyuan3d,zhao2025hunyuan3d,hunyuan3d2025hunyuan3d,lai2025hunyuan3d2_5}, have greatly simplified the 3D content creation process.
 However, despite their strong performance in geometry generation, achieving high visual fidelity remains challenging.
 Generated assets often lack intricate textures and fine-grained details observed in real-world subjects.
 This limitation largely stems from the scarcity of high-quality 3D data with diverse appearances, which pales in comparison to the vast visual knowledge encapsulated in billion-scale 2D imagery.
@@ -105,79 +113,70 @@ Consequently, 3D generative models may not fully capture the nuanced visual char
 
 To bridge this gap, we propose to distill the rich visual priors of pre-trained 2D diffusion models into 3D generators.
 These models encapsulate a deep understanding of visual fidelity and fine-grained details, far surpassing the scope of existing 3D datasets.
-To this end, we introduce the On-the-fly Rendering Editing Optimization (OREO) framework\textcolor{red}{, as illustrated in Fig.~\ref{fig:teaser}}.
+To this end, we introduce the On-the-fly Rendering Editing Optimization (OREO) framework, as illustrated in Fig.~\ref{fig:teaser}.
 The core idea is to establish a dynamic alignment mechanism: instead of learning from static datasets, the generator improves by learning from pseudo ground truths generated on-the-fly.
-Specifically, OREO implements a \textit{Render-Edit-Optimize} loop, where the model renders views from its current output, receives corrective edits to enhance realism, and uses these refined views as supervision targets.
+Specifically, OREO implements a Render-Edit-Optimize loop, where the model renders views from its current output, receives corrective edits to enhance realism, and uses these refined views as supervision targets.
 
 At the core of this loop is the Reinforced Editing algorithm, which generates high-quality supervision signals.
-To ensure reliable guidance, Reinforced Editing prioritizes structure preservation, focusing on injecting realistic textures and fine-grained details while maintaining the original spatial layout.
+To ensure reliable guidance, Reinforced Editing prioritizes structure preservation, focusing on improving visual fidelity while maintaining the original spatial layout.
 Inspired by recent inversion-free editing techniques, this approach mitigates the unwanted geometric deviations common in standard editing methods, ensuring that the generated pseudo-GTs remain geometrically aligned with the underlying 3D mesh.
-We integrate these refined targets into a closed-loop optimization process, where the generator minimizes the discrepancy between its rendered predictions and the enhanced pseudo-GTs.
-Additionally, a geometric regularization term is employed to maintain structural stability during training.
+To turn these refined targets into effective supervision, we propose Contrastive Distillation, which treats the edited view as a positive and the original rendering as a negative, and distills the fidelity gap into the 3D generator through a latent-space contrastive objective.
 Experiments on the state-of-the-art Trellis model demonstrate that OREO effectively improves its performance, producing 3D assets with superior visual realism.
-
 In summary, our contributions are as follows:
 \begin{enumerate}\setlength{\itemsep}{0pt}
     \item We introduce OREO, a novel alignment framework that leverages pre-trained 2D diffusion priors to enhance the fidelity of 3D generators through an on-the-fly optimization loop with dynamic pseudo ground truths.
-    \item We propose the Reinforced Editing algorithm, which adopts an inversion-free strategy to inject realistic textures into rendered views while prioritizing structure preservation for robust 3D optimization.
-    \item We validate the effectiveness of OREO on state-of-the-art 3D generators. Results show that our method effectively improves visual realism and texture richness while preserving geometric integrity.
+    \item At its core, we propose Reinforced Editing, an inversion-free algorithm that improves the visual fidelity of rendered views while preserving structure, coupled with Contrastive Distillation that turns the edited/original views into latent-space positive/negative anchors for effective generator post-training.
+    \item We validate the effectiveness of OREO on state-of-the-art 3D generators. Results show that our method effectively improves visual fidelity while preserving geometric integrity.
 \end{enumerate}
 
 \section{Related Work}
 \label{sec:related_work}
 
 \noindent\textbf{Learning-based 3D Generation and Generator Post-training.}
-\textcolor{red}{State-of-the-art learning-based 3D generation methods typically train 3D-native foundations in latent spaces to synthesize 3D assets in a feed-forward manner~\cite{xiang2025structured,zhao2025hunyuan3d,ye2025hi3dgen,li2025triposg,guo2025hyper3d,yushi2025gaussiananything,chen20253dtopia,lin2025diffsplat,li2025step1x,zhang2025bang}.
-These methods are predominantly trained on synthetic 3D datasets such as Objaverse~\cite{deitke2023objaverse}, whose scale and diversity remain limited compared with real-world 2D image data.
-As a result, the generated 3D assets still leave significant room for improvement in visual fidelity, texture details, and realism.
-In contrast, pretrained 2D diffusion priors capture richer appearance priors from large-scale real images.
-Therefore, a feasible direction is to transfer the high-fidelity appearance prior encoded in 2D diffusion priors to 3D generative models, compensating for the limitations of 3D data in texture detail and realism.
-Following this direction, OREO leverages 2D image editing to transform imperfect rendered views from a 3D generator into higher-fidelity, structure-preserving edited views, and uses the discrepancy between the original and edited views as online supervision for generator post-training.}
+Recent learning-based 3D generators synthesize assets feed-forward in latent spaces~\cite{xiang2025structured,zhao2025hunyuan3d,ye2025hi3dgen,li2025triposg,guo2025hyper3d,yushi2025gaussiananything,chen20253dtopia,lin2025diffsplat,li2025step1x,zhang2025bang,yang20264dvd,yang2026gencompositor,liang2026aligncvc,wang2026one2scene,liu2025mvboost}, but their reliance on synthetic data such as Objaverse~\cite{deitke2023objaverse} caps visual fidelity and texture detail.
+OREO addresses this by transferring appearance priors from pretrained 2D diffusion models: it uses 2D image editing to lift rendered views into higher-fidelity, structure-preserving edited views, and treats the discrepancy as online supervision for post-training.
 
-\noindent\textcolor{red}{\textbf{2D Image Editing for Fidelity-Enhancing Supervision.}}
-\textcolor{red}{To obtain high-quality supervision signals, edited views should enhance the visual fidelity of the original rendered views while preserving their camera viewpoints and structural information.
-To this end, we draw inspiration from existing 2D image editing methods.
-Recent training-based image editors typically take an input image and a text instruction as conditions, learning to generate outputs that satisfy the desired edit while demonstrating strong appearance modification and detail enhancement capabilities~\cite{brooks2023instructpix2pix,zhang2023magicbrush,sheynin2023emu,zhao2024ultraedit}.
-However, these methods do not explicitly constrain the output to preserve the input camera viewpoint, object pose, or overall layout, so the edited images may introduce structural errors and provide incorrect editing signals.
-To reduce such structural errors, we further consider combining these powerful image editors with training-free editing methods to impose more controllable constraints on the editing process~\cite{hertz2022prompt,mokady2023null}.
-Some inversion-based editing methods first invert the input image into the noise or latent space and then perform editing along the inverted trajectory, but inversion errors may still affect structure preservation~\cite{mokady2023null}.
-In contrast, inversion-free editing methods avoid explicit image inversion and edit images by coupling the generation trajectories of the source image and the target direction~\cite{couairon2024flowedit,zhang2024rfinversion}, making them a better fit for constructing structure-aligned edited views in OREO.}
+\noindent\textbf{2D Image Editing for Fidelity-Enhancing Supervision.}
+Effective supervision requires edits that enhance fidelity while preserving viewpoint and structure.
+Training-based image editors~\cite{brooks2023instructpix2pix,zhang2023magicbrush,sheynin2023emu,zhao2024ultraedit} inject appearance details but do not constrain viewpoint or layout, and inversion-based training-free methods~\cite{hertz2022prompt,mokady2023null} still suffer from inversion errors.
+Inversion-free approaches~\cite{couairon2024flowedit,zhang2024rfinversion} instead couple source and target trajectories, avoiding inversion altogether; we build our Reinforced Editing on this line.
 
-\noindent\textcolor{red}{\textbf{2D Priors for 3D Editing and Generation.}}
-\textcolor{red}{Although 2D priors have been explored for 3D editing and generation, existing methods do not directly meet the goal of post-training a feed-forward 3D generator.
-On the one hand, 3D editing and geometry-conditioned editing methods, such as Instruct-NeRF2NeRF~\cite{haque2023instruct}, DreamEditor~\cite{zhuang2023dreameditor}, GaussianEditor~\cite{wang2024gaussianeditor}, DFFSplat~\cite{koh2026diffusion}, Image Sculpting~\cite{yenphraphai2024image}, MvDrag3D~\cite{chen2024mvdrag3d}, and GeoDiffusion~\cite{chen2024geodiffusion}, mainly target individual instances or scenes and typically rely on per-scene optimization, making it difficult to amortize the fidelity-enhancing prior into a generalizable 3D generator.
-On the other hand, score-distillation methods such as DreamFusion~\cite{poole2022dreamfusion}, Magic3D~\cite{lin2023magic3d}, and ProlificDreamer~\cite{wang2024prolificdreamer} are optimization-based text-to-3D methods whose input setting and inference pipeline differ from OREO's learning-based image-to-3D generator post-training, making them unsuitable for direct quantitative comparison.
+\noindent\textbf{2D Priors for 3D Editing and Generation.}
+Although 2D priors have been explored for 3D editing and generation, existing methods do not directly meet the goal of post-training a feed-forward 3D generator.
+On the one hand, 3D editing and geometry-conditioned editing methods, such as Instruct-NeRF2NeRF~\cite{haque2023instruct}, DreamEditor~\cite{zhuang2023dreameditor}, GaussianEditor~\cite{wang2024gaussianeditor}, DFFSplat~\cite{koh2026diffusion}, Image Sculpting~\cite{yenphraphai2024image}, MvDrag3D~\cite{chen2024mvdrag3d}, GeoDiffusion~\cite{chen2024geodiffusion}, and Omni-3DEdit~\cite{chen2026omni}, mainly target individual instances or scenes and typically rely on per-scene optimization, making it difficult to amortize the fidelity-enhancing prior into a generalizable 3D generator.
+On the other hand, score-distillation methods such as DreamFusion~\cite{poole2022dreamfusion}, Magic3D~\cite{lin2023magic3d}, ProlificDreamer~\cite{wang2024prolificdreamer}, ScaleDreamer~\cite{ma2024scaledreamer}, Hybrid Fourier Score Distillation~\cite{yang2025hybrid}, and Progressive Rendering Distillation~\cite{ma2025progressive} are optimization-based text-to-3D methods whose input setting and inference pipeline differ from OREO's learning-based image-to-3D generator post-training, making them unsuitable for direct quantitative comparison.
 DMD~\cite{yin2024onestep} is closer to a generator-learning paradigm and is therefore retained as a reasonable score-distillation ablation baseline; however, it still relies on implicit score-gradient supervision.
-In contrast, OREO explicitly constructs high-fidelity, structure-aligned edited views as pseudo-GT and uses stable online pixel-level supervision to post-train the 3D generator.}
+In contrast, OREO explicitly constructs high-fidelity, structure-aligned edited views as pseudo-GT and uses stable online supervision to post-train the 3D generator.
 
 \section{Method}
 \label{sec:method}
 
 We present OREO, an alignment framework that enhances 3D visual fidelity via on-the-fly optimization.
 An overview of the full pipeline is illustrated in Fig.~\ref{fig:pipeline}.
-\textcolor{red}{We leverage a pre-trained 2D editing model to construct pseudo ground truths on the fly, overcoming the inability to train without 3D ground-truth supervision.}
-\textcolor{red}{Specifically, the generator performs on-policy sampling to obtain a denoised 3D asset at an intermediate step, which is then rendered into a 2D view from a sampled camera pose, as detailed in Sec.~\ref{sec:preliminaries}.}
-\textcolor{red}{We then apply the image editing prior with our proposed Reinforced Editing in Sec.~\ref{sec:reinforced_editing} to enhance the view, improving visual fidelity while preserving structural consistency.}
-\textcolor{red}{Finally, using the enhanced view as a dynamic supervision signal, the training method in Sec.~\ref{sec:optimization} distills the fidelity improvement back into the 3D generator.}
+We leverage a pre-trained 2D editing model to construct pseudo ground truths on the fly, overcoming the inability to train without 3D ground-truth supervision.
+Specifically, the generator performs on-policy sampling to obtain a denoised 3D asset at an intermediate step, which is then rendered into a 2D view from a sampled camera pose, as detailed in Sec.~\ref{sec:preliminaries}.
+We then apply the image editing prior with our proposed Reinforced Editing in Sec.~\ref{sec:reinforced_editing} to enhance the view, improving visual fidelity while preserving structural consistency.
+Finally, using the enhanced view as a dynamic supervision signal, the training method in Sec.~\ref{sec:optimization} distills the fidelity improvement back into the 3D generator.
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
   \centering
-  \includegraphics[width=\textwidth,trim=80 0 80 0,clip]{figures_final/OREO_pipeline_v3.drawio.pdf}
-  \caption{\textbf{Overview of OREO.} We establish a closed-loop optimization cycle where the 3D generator learns from its own rendered outputs. (Left) The generator predicts a denoised asset, which is rendered into a 2D view $x^{\texttt{src}}$. (Right) \textit{Reinforced Editing}, transforms $x^{\texttt{src}}$ into a high-fidelity target $x^{\texttt{tgt}}$ by coupling \textcolor{red}{a positive guidance term with an unconditional source anchor}, injecting realistic details while preserving structure, detailed in Sec.~\ref{sec:reinforced_editing}. Finally, $x^{\texttt{tgt}}$ serves as a pseudo-GT to supervise $x^{\texttt{src}}$, guiding the generator update.}
+  \includegraphics[width=\textwidth,trim=60 0 60 0,clip]{figures_final/OREO_pipeline_v3.drawio.pdf}
+  \caption{\textbf{Overview of OREO.} The training generator produces a 3D asset via on-policy ODE rollout that is rendered into a source view $x^{\texttt{src}}$. \textcolor{ForestGreen}{Reinforced Editing} turns $x^{\texttt{src}}$ into a high-fidelity target $x^{\texttt{tgt}}$, and \textcolor{red}{Contrastive Distillation} uses $(x^{\texttt{src}}, x^{\texttt{tgt}})$ as a negative/positive pair to supervise the generator in the latent space.}
   \label{fig:pipeline}
 \end{figure}
 
 \subsection{Problem Formulation}
 \label{sec:problem_formulation}
-\textcolor{red}{Given a reference image $x^{\texttt{ref}}$, the 3D generator $G_\theta$ produces an asset that is projected into a 2D view $x^{\texttt{src}} = \mathcal{P}(G_\theta(x^{\texttt{ref}}), \pi)$ via a differentiable renderer $\mathcal{P}$ under camera pose $\pi$.}
-\textcolor{red}{A pre-trained 2D editor $\mathcal{E}_\phi$ then enhances this view into a higher-fidelity target $x^{\texttt{tgt}} = \mathcal{E}_\phi(x^{\texttt{src}}, x^{\texttt{ref}})$.}
-\textcolor{red}{The generator is optimized by minimizing the discrepancy between the two:}
+Given a reference image $x^{\texttt{ref}}$, the 3D latent generator $G_\theta$ followed by a decoder $\mathcal{D}$ produces a 3D asset $\mathcal{A} = \mathcal{D}(G_\theta(x^{\texttt{ref}}))$.
+A renderer $\mathcal{P}$ then projects $\mathcal{A}$ into a 2D view $x^{\texttt{src}} = \mathcal{P}(\mathcal{A}, \pi)$ under camera pose $\pi$.
+In our training framework, a pre-trained 2D editor $\mathcal{E}_\phi$ then enhances this view into a higher-fidelity target $x^{\texttt{tgt}} = \mathcal{E}_\phi(x^{\texttt{src}}, x^{\texttt{ref}})$.
+The generator is optimized by minimizing the discrepancy between the two:
 \begin{equation}
 \label{eq:task}
 \theta^* = \arg\min_\theta \mathbb{E}_{x^{\texttt{ref}}, \pi}
 \left[\mathcal{L}(x^{\texttt{src}}, x^{\texttt{tgt}})\right]
 \end{equation}
-\textcolor{red}{where $\mathcal{L}$ is a supervision loss that encourages improved visual fidelity.}
+where $\mathcal{L}$ is a supervision loss that encourages improved visual fidelity.
 
 
 \subsection{Preliminaries}
@@ -198,7 +197,7 @@ A key property used in our method is single-step estimation of the clean sample 
     \label{eq:single_step_estimation}
     \hat{x}_0 = x_t - t \cdot v(x_t; t, c)
 \end{equation}
-To distinguish modalities, we use $z$ and $\theta$ for the 3D generator $v_\theta$, where $G_\theta$ denotes its ODE sampling process.
+To distinguish modalities, we use $z$ and $\theta$ for the 3D generator $v_\theta$, where $G_\theta$ denotes its ODE sampling process and the pre-trained frozen weights are denoted $v_{\theta_{pre}}$.
 Similarly, we use $x$ and $\phi$ for the 2D editor $v_\phi$, where $\mathcal{E}_\phi$ denotes the multi-step editing process as described below.
 
 
@@ -208,12 +207,12 @@ We leverage FlowEdit~\cite{couairon2024flowedit}, an inversion-free method that 
 Starting from $x^{\texttt{src}}$, it iteratively updates the editing variable via $x^{\texttt{edit}} \leftarrow x^{\texttt{edit}} - \Delta t \cdot \tilde{v}$, where the differential velocity is defined as:
 \begin{equation}
     \label{eq:flowedit_transition}
-    \tilde{v} = v^{\texttt{tgt}}(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{tgt}}) - v^{\texttt{src}}(\textcolor{red}{x_t^{\texttt{src}}}; t, c^{\texttt{src}})
+    \tilde{v} = v^{\texttt{tgt}}(x_t^{\texttt{tgt}}; t, c^{\texttt{tgt}}) - v^{\texttt{src}}(x_t^{\texttt{src}}; t, c^{\texttt{src}})
 \end{equation}
 where the \textbf{source branch} and the \textbf{target branch} is constructed as
 \begin{equation}
     \label{eq:flowedit_states}
-    \textcolor{red}{x_t^{\texttt{src}}} = (1-t)x^{\texttt{src}} + t\epsilon, \quad \textcolor{red}{x_t^{\texttt{tgt}}} = x^{\texttt{edit}} + (\textcolor{red}{x_t^{\texttt{src}}} - x^{\texttt{src}}), \quad \epsilon \sim \mathcal{N}(0, I).
+    x_t^{\texttt{src}} = (1-t)x^{\texttt{src}} + t\epsilon, \quad x_t^{\texttt{tgt}} = x^{\texttt{edit}} + (x_t^{\texttt{src}} - x^{\texttt{src}}), \quad \epsilon \sim \mathcal{N}(0, I).
 \end{equation}
 The editing process is performed over the last $N_e$ steps of the full $N$-step ODE schedule.
 With integration step size $\Delta t = t_{i-1} - t_i$, $x^{\texttt{edit}}$ evolves into $x^{\texttt{tgt}}$, which transfers the image from being consistent with $c^{\texttt{src}}$ to following $c^{\texttt{tgt}}$ without the need for costly inversion that maps the image back to noise, thereby preserving structural fidelity.
@@ -229,15 +228,15 @@ With integration step size $\Delta t = t_{i-1} - t_i$, $x^{\texttt{edit}}$ evolv
     \State Select time steps $\{t_i\}_{i=0}^{N_e}$ as the last $N_e$ steps from the full schedule of $N$ steps
     \For{$i = 0$ to $N_e-1$} \Comment{\texttt{FlowEdit: Backward Euler Integration}}
         \State $t \leftarrow t_i$, $\Delta t \leftarrow t_{i+1} - t_i$
-        \State $\textcolor{red}{x_t^{\texttt{src}}} \leftarrow (1-t)x^{\texttt{src}} + t\epsilon$
-        \State $\textcolor{red}{x_t^{\texttt{tgt}}} \leftarrow x^{\texttt{edit}} + (\textcolor{red}{x_t^{\texttt{src}}} - x^{\texttt{src}})$ \Comment{\texttt{Eq.~\ref{eq:flowedit_states}}}
+        \State $x_t^{\texttt{src}} \leftarrow (1-t)x^{\texttt{src}} + t\epsilon$
+        \State $x_t^{\texttt{tgt}} \leftarrow x^{\texttt{edit}} + (x_t^{\texttt{src}} - x^{\texttt{src}})$ \Comment{\texttt{Eq.~\ref{eq:flowedit_states}}}
         
         \Statex \texttt{// Reinforced Editing (Sec.~\ref{sec:reinforced_editing})}
-        \State $\tilde{v} \leftarrow v_\phi^{w}(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - \textcolor{red}{v_\phi(\textcolor{red}{x_t^{\texttt{src}}}; t, \emptyset)}$ \Comment{\texttt{Eq.~\ref{eq:red_diff_velocity}}}
+        \State $\tilde{v} \leftarrow v_\phi^{w}(x_t^{\texttt{tgt}}; t, c^{\texttt{ref}}) - v_\phi(x_t^{\texttt{src}}; t, \emptyset)$ \Comment{\texttt{Eq.~\ref{eq:red_diff_velocity}}}
         \State $x^{\texttt{edit}} \leftarrow x^{\texttt{edit}} - \tilde{v} \Delta t$ \Comment{\texttt{FlowEdit: Euler Step}}
     
         \Statex \texttt{// Noise Update}
-        \State $\epsilon \leftarrow \epsilon - (v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Eq.~\ref{eq:red_dynamic_noise}}}
+        \State $\epsilon \leftarrow \epsilon - (v_\phi(x_t^{\texttt{tgt}}; t, c^{\texttt{ref}}) - v_\phi(x_t^{\texttt{tgt}}; t, \emptyset)) \cdot (1-t)$ \Comment{\texttt{Eq.~\ref{eq:red_dynamic_noise}}}
     \EndFor
     \State \Return $x^{\texttt{tgt}} \leftarrow x^{\texttt{edit}}$
     \end{algorithmic}
@@ -247,121 +246,122 @@ With integration step size $\Delta t = t_{i-1} - t_i$, $x^{\texttt{edit}}$ evolv
 \subsection{Constructing On-the-fly Pseudo-GTs via Reinforced Editing}
 \label{sec:reinforced_editing}
 
-\textcolor{red}{A critical step in our pipeline is transforming the rendered view $x^{\texttt{src}}$ into a high-fidelity pseudo ground truth $x^{\texttt{tgt}}$.}
-\textcolor{red}{Existing image editing models can leverage their learned priors to make rendered views more realistic, but often alter the camera perspective or object pose, as analyzed in Sec.~\ref{4_1}.}
-\textcolor{red}{We propose Reinforced Editing to enable structure-preserving enhancement on top of pre-trained editing models.}
-\textcolor{red}{Different from the original FlowEdit that transfers between separate conditions $c^{\texttt{src}}$ and $c^{\texttt{tgt}}$ in Eq.~\ref{eq:flowedit_transition}, our goal is to enhance the rendered view to better resemble a novel view of $x^{\texttt{ref}}$, where no independent $c^{\texttt{src}}$ exists.}
-\textcolor{red}{We thus guide the target branch toward $c^{\texttt{ref}} = c^{\texttt{tgt}}$ and replace the source branch with an unconditional prediction:}
+A critical step in our pipeline is transforming the rendered view $x^{\texttt{src}}$ into a high-fidelity pseudo ground truth $x^{\texttt{tgt}}$.
+Existing image editing models~\cite{wu2025qwen} can leverage their learned priors to make rendered views more realistic, but often alter the camera perspective or object pose, as analyzed in Sec.~\ref{sec:exp_feedback}.
+We propose Reinforced Editing to enable structure-preserving enhancement on top of pre-trained editing models.
+Different from the original FlowEdit~\cite{couairon2024flowedit} that transfers between separate conditions $c^{\texttt{src}}$ and $c^{\texttt{tgt}}$ in Eq.~\ref{eq:flowedit_transition}, our goal is to enhance the rendered view to better resemble a novel view of $x^{\texttt{ref}}$, where no independent $c^{\texttt{src}}$ exists.
+We thus guide the target branch toward $c^{\texttt{ref}} = c^{\texttt{tgt}}$ and replace the source branch with an unconditional prediction:
 \begin{equation}
     \label{eq:red_diff_velocity}
-    \tilde{v} = v_\phi^{w}(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - \textcolor{red}{v_\phi(\textcolor{red}{x_t^{\texttt{src}}}; t, \emptyset)},
+    \tilde{v} = v_\phi^{w}(x_t^{\texttt{tgt}}; t, c^{\texttt{ref}}) - v_\phi(x_t^{\texttt{src}}; t, \emptyset),
 \end{equation}
-\textcolor{red}{where $v_\phi$ is the velocity field of the pre-trained 2D editor, $w$ is the classifier-free guidance scale~\cite{ho2021classifier}, and $c^{\texttt{ref}}$ encodes both the reference image $x^{\texttt{ref}}$ and a text prompt indicating a viewpoint change, as illustrated in Fig.~\ref{fig:pipeline}.}
+where $v_\phi$ is the velocity field of the pre-trained 2D editor, $w$ is the classifier-free guidance scale~\cite{ho2021classifier}, and $c^{\texttt{ref}}$ encodes both the reference image $x^{\texttt{ref}}$ and a text prompt indicating a viewpoint change, as illustrated in Fig.~\ref{fig:pipeline}.
 
 \textbf{Noise Update.}
-\textcolor{red}{The editing effect may be insufficient because the shared noise $\epsilon$ in Eq.~\ref{eq:flowedit_states} is randomly sampled in each iteration, whose stochasticity can weaken the editing strength~\cite{xie2026dnaedit}.}
-\textcolor{red}{To address this, we dynamically update $\epsilon$ at each step by injecting the classifier-free guidance signal into the noise:}
+The editing effect may be insufficient because the shared noise $\epsilon$ in Eq.~\ref{eq:flowedit_states} is randomly sampled in each iteration, whose stochasticity can weaken the editing strength~\cite{xie2026dnaedit}.
+To address this, we dynamically update $\epsilon$ at each step by injecting the classifier-free guidance signal into the noise:
 \begin{equation}
     \label{eq:red_dynamic_noise}
-    \epsilon \leftarrow \epsilon - (v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, c^{\texttt{ref}}) - v_\phi(\textcolor{red}{x_t^{\texttt{tgt}}}; t, \emptyset)) \cdot (1-t)
+    \epsilon \leftarrow \epsilon - (v_\phi(x_t^{\texttt{tgt}}; t, c^{\texttt{ref}}) - v_\phi(x_t^{\texttt{tgt}}; t, \emptyset)) \cdot (1-t)
 \end{equation}
-\textcolor{red}{This update aligns the noise with the conditional direction, strengthening the editing effect while preserving fine-grained structural details.
-The complete procedure is summarized in Algorithm~\ref{alg:red}.}
+This update aligns the noise with the conditional direction, strengthening the editing effect while preserving fine-grained structural details.
+The complete procedure is summarized in Algorithm~\ref{alg:red}.
 
 
 \begin{algorithm}[t]
     \caption{Closed-loop Optimization via Dynamic Pseudo-GTs}
     \label{alg:oreo}
     \begin{algorithmic}[1]
-    \Require Generator $G_\theta$, Frozen rollout generator $G_{\theta_{pre}}$, 2D editor $\mathcal{E}_\phi$, \textcolor{red}{discriminator $D_\psi$}, Dataset $\mathcal{S}$, \textcolor{red}{learning rates $\eta_G,\eta_D$}
+    \Require Generator $v_\theta$, frozen pretrained velocity $v_{\theta_{pre}}$, 2D editor $\mathcal{E}_\phi$, learning rate $\eta$
     \Ensure Optimized parameters $\theta^*$
     \While{not converged}
-        \State Sample $x^{\texttt{ref}} \sim \mathcal{S}$, $\pi$, and $t \sim \mathcal{U}(0,1)$
-        \State $z_0 = G_{\theta_{pre}}(x^{\texttt{ref}})$ \Comment{\texttt{Rollout}: Generate clean latent}
-        \State $z_t = (1-t)z_0 + t\epsilon,\ \epsilon \sim \mathcal{N}(0,I)$ \Comment{\texttt{Noise Injection}}
-        \State Predict $\hat{z}_0$ from $z_t$ using $G_\theta$ \Comment{\texttt{Prediction}: Denoise latent}
-        \State $x^{\texttt{src}} = \mathcal{P}(\mathcal{D}(\hat{z}_0), \pi)$ \Comment{\texttt{Render}: Decode and project}
+        \State Given reference image $x^{\texttt{ref}}$
+        \State $z_0 = G_\theta(x^{\texttt{ref}})$ \Comment{\texttt{Rollout}: Generate clean latent}
+        \State Sample camera pose $\pi$
+        \State $x^{\texttt{src}} = \mathcal{P}(\mathcal{D}(z_0), \pi)$ \Comment{\texttt{Render}: Decode and project}
         \State Obtain $x^{\texttt{tgt}}$ via Algorithm~\ref{alg:red} from $x^{\texttt{src}}$ and $x^{\texttt{ref}}$ \Comment{\texttt{Reinforced Editing}}
-        \State \textcolor{red}{Update $D_\psi$ using $x^{\texttt{tgt}}$ as real and $x^{\texttt{src}}$ as fake \Comment{\texttt{Adversarial Step}}}
-        \State $\mathcal{L}_{sup} = \| x^{\texttt{src}} - x^{\texttt{tgt}} \|^2$ \Comment{\texttt{Supervision}}
+        \State Sample $t \sim \mathcal{U}(0,1)$
+        \State $z_t = (1-t)z_0 + t\epsilon,\ \epsilon \sim \mathcal{N}(0,I)$ \Comment{\texttt{Noise Injection}}
+        \State Predict $\hat{z}_0$ from $z_t$ using $v_\theta$ \Comment{\texttt{Prediction}: Denoise latent, Eq.~\ref{eq:single_step_estimation}}
+        \State $\hat{z}_t = (1-t)\hat{z}_0 + t\epsilon',\ \epsilon' \sim \mathcal{N}(0,I)$ \Comment{\texttt{Re-noise anchor prediction}}
+        \State $z_0^{+} = \hat{z}_t - t \cdot v_{\theta_{pre}}(\hat{z}_t; t, x^{\texttt{tgt}})$ \Comment{\texttt{Positive}, Eq.~\ref{eq:contrast_pos_neg}}
+        \State $z_0^{-} = \hat{z}_t - t \cdot v_{\theta_{pre}}(\hat{z}_t; t, x^{\texttt{src}})$ \Comment{\texttt{Negative}, Eq.~\ref{eq:contrast_pos_neg}}
+        \State $\mathcal{L}_{contrast} = \| \hat{z}_0 - z_0^{+} \|^2 - \| \hat{z}_0 - z_0^{-} \|^2$ \Comment{\texttt{Latent contrastive loss}, Eq.~\ref{eq:contrast_loss}}
         \State $\mathcal{L}_{reg} = \| v_\theta(z_t) - v_{\theta_{pre}}(z_t) \|^2$ \Comment{\texttt{Regularization}}
-        \State \textcolor{red}{Compute $\mathcal{L}_{adv}$ by classifying $x^{\texttt{src}}$ as real with $D_\psi$}
-        \State \textcolor{red}{$\theta \leftarrow \theta - \eta_G \nabla_\theta (\mathcal{L}_{sup} + \lambda \mathcal{L}_{reg} + \gamma \mathcal{L}_{adv})$ \Comment{\texttt{Update generator}}}
+        \State $\theta \leftarrow \theta - \eta \nabla_\theta (\mathcal{L}_{contrast} + \lambda \mathcal{L}_{reg})$ \Comment{\texttt{Update generator}}
     \EndWhile
     \end{algorithmic}
     \end{algorithm}
     
 
 
-\subsection{Generator Optimization via Pseudo-GT Supervision}
+\subsection{Contrastive Distillation with Pseudo-GTs}
 \label{sec:optimization}
 
 
-We optimize the 3D generator $G_\theta$ in a closed-loop manner, leveraging dynamically generated pseudo-GTs as supervision.
-In each training iteration, we first sample a clean latent $z_0 = G_{\theta_{pre}}(x^{\texttt{ref}})$ from the frozen pre-trained generator and perturb it with Gaussian noise at a random timestep $t \sim \mathcal{U}(0,1)$ to obtain $z_t = (1-t)z_0 + t\epsilon$.
-Given $z_t$, the trainable generator predicts the velocity field $v_\theta(z_t; t, c)$, and the denoised latent is estimated by
-\begin{equation}
-\hat{z}_0 = z_t - t \cdot v_\theta(z_t; t, c),
-\end{equation}
-which is decoded and rendered with a sampled camera pose $\pi$ as $x^{\texttt{src}} = \mathcal{P}(\mathcal{D}(\hat{z}_0), \pi)$.
-To enhance visual fidelity, we generate a pseudo-GT $x^{\texttt{tgt}}$ from $x^{\texttt{src}}$ using Reinforced Editing in Algorithm~\ref{alg:red}.
-\textcolor{red}{\textbf{Pixel Supervision.}}
-The supervision loss is defined as
-\begin{equation}
-\mathcal{L}_{sup} = \| x^{\texttt{src}} - x^{\texttt{tgt}} \|^2
-\end{equation}
-\textcolor{red}{and is backpropagated through the differentiable renderer and decoder to update $\theta$.
-This pixel-level objective provides stable view-aligned supervision, allowing the generator to inherit the structure, color, and coarse appearance of the edited pseudo-GT.}
+To instantiate the abstract loss $\mathcal{L}$ in Eq.~\ref{eq:task} for the 3D latent generator $G_\theta$, we lift the supervision from the pixel space of $x^{\texttt{src}}, x^{\texttt{tgt}}$ into the latent space of the pretrained generator $v_{\theta_{pre}}$, and cast it as a contrastive objective: we treat the generator's predicted clean latent $\hat{z}_0$ as an \emph{anchor}, with $x^{\texttt{tgt}}$ inducing a positive and $x^{\texttt{src}}$ inducing a negative, pulling the anchor toward the positive while pushing it away from the negative. This closes the Render-Edit-Optimize loop.
 
-\textcolor{red}{\textbf{Adversarial Loss.}
-However, the edited view $x^{\texttt{tgt}}$ also contains high-frequency texture details produced by the 2D editing prior, which may be weakened by direct regression due to the averaging effect of MSE.
-To better transfer such fine-grained appearance cues, we introduce an auxiliary adversarial loss that encourages the rendered prediction $x^{\texttt{src}}$ to be indistinguishable from $x^{\texttt{tgt}}$ under an appearance discriminator.
-We instantiate the discriminator $D_\psi$ as a projected discriminator on frozen DINOv3-S features, with lightweight trainable heads attached to multi-scale intermediate representations.}
-
-\textcolor{red}{The generator-side adversarial loss is
+\textbf{Per-Iteration Setup.}
+Concretely, in each training iteration, given a reference image $x^{\texttt{ref}}$, we roll out a clean latent $z_0 = G_\theta(x^{\texttt{ref}})$ via ODE sampling.
+We then sample a camera pose $\pi$ and render $x^{\texttt{src}} = \mathcal{P}(\mathcal{D}(z_0), \pi)$.
+From it we obtain a pseudo-GT $x^{\texttt{tgt}}$ via Reinforced Editing in Algorithm~\ref{alg:red}.
+Finally, we sample a timestep $t \sim \mathcal{U}(0,1)$, perturb the latent as $z_t = (1-t)z_0 + t\epsilon$ with $\epsilon \sim \mathcal{N}(0,I)$, and recover the single-step prediction
 \begin{equation}
-\mathcal{L}_{adv}(G_\theta)
-= \mathbb{E}_{x^{\texttt{src}}}
-\left[\operatorname{BCE}(D_\psi(x^{\texttt{src}}), 1)\right].
+\hat{z}_0 = z_t - t \cdot v_\theta(z_t; t, x^{\texttt{ref}}),
 \end{equation}
-The discriminator is optimized with edited pseudo-GTs as real samples and rendered predictions as fake samples:
-\begin{equation}
-\mathcal{L}_{disc}(D_\psi)
-= \mathbb{E}_{x^{\texttt{tgt}}}
-\left[\operatorname{BCE}(D_\psi(x^{\texttt{tgt}}), 1)\right]
-+ \mathbb{E}_{x^{\texttt{src}}}
-\left[\operatorname{BCE}(D_\psi(x^{\texttt{src}}), 0)\right].
-\end{equation}}
+which serves as the anchor in our contrastive objective below.
 
-\textcolor{red}{\textbf{Final Objective.}}
-To preserve geometric stability, we regularize the velocity field deviation from the pre-trained prior:
-
+\textbf{Latent-Space Contrastive Supervision.}
+Inspired by~\cite{yu2026self}, we re-noise the anchor with a fresh draw $\epsilon' \sim \mathcal{N}(0,I)$ as $\hat{z}_t = (1-t)\hat{z}_0 + t\epsilon'$, and run the frozen pretrained generator in two passes that share $\hat{z}_t$ but differ in their visual condition,
 \begin{equation}
-\mathcal{L}_{reg} = \| v_\theta(z_t) - v_{\theta_{pre}}(z_t) \|^2
+\label{eq:contrast_pos_neg}
+z_0^{+} = \hat{z}_t - t \cdot v_{\theta_{pre}}(\hat{z}_t; t, x^{\texttt{tgt}}),
+\quad
+z_0^{-} = \hat{z}_t - t \cdot v_{\theta_{pre}}(\hat{z}_t; t, x^{\texttt{src}}).
 \end{equation}
-where $v_{\theta_{pre}}$ is the velocity field induced by the frozen pre-trained generator.
-\textcolor{red}{The final objective is $\mathcal{L}_{total} = \mathcal{L}_{sup} + \lambda \mathcal{L}_{reg} + \gamma \mathcal{L}_{adv}$.}
+Both $z_0^{+}$ and $z_0^{-}$ are detached from the computational graph and serve as the positive and the negative, respectively. Under $x^{\texttt{tgt}}$ the pretrained generator denoises toward the edited pseudo-GT, while under $x^{\texttt{src}}$ it denoises toward the un-edited rendering.
+The contrastive objective then pulls the anchor $\hat{z}_0$ toward $z_0^{+}$ and pushes it away from $z_0^{-}$,
+\begin{equation}
+\label{eq:contrast_loss}
+\mathcal{L}_{contrast} = \| \hat{z}_0 - z_0^{+} \|^2 - \| \hat{z}_0 - z_0^{-} \|^2.
+\end{equation}
+To preserve geometric stability, we further regularize the velocity field deviation from the pre-trained prior,
+\begin{equation}
+\mathcal{L}_{reg} = \| v_\theta(z_t) - v_{\theta_{pre}}(z_t) \|^2,
+\end{equation}
+giving the total objective $\mathcal{L}_{total} = \mathcal{L}_{contrast} + \lambda \mathcal{L}_{reg}$.
 The overall training procedure is summarized in Algorithm~\ref{alg:oreo}.
 
 
 \section{Experiments}
 \label{sec:experiments}
 
+\subsection{Experimental Setup}
+\label{sec:exp_setup}
 
-In this section, we evaluate whether OREO can effectively distill 2D editing priors into a 3D generator.
-Our main objective is to verify that on-the-fly adaptive pseudo-GT supervision improves visual fidelity and texture details while preserving geometric structure and semantic identity.
-We first validate the feedback quality of Reinforced Editing in Sec.~\ref{4_1}, then present the main 3D results in Sec.~\ref{4_2}, and finally provide ablations in Sec.~\ref{4_3}.
+\textbf{Datasets.}
+Existing 3D benchmarks such as Objaverse~\cite{deitke2023objaverse} subsets focus on everyday objects, where pre-trained baselines already do well and fidelity gaps stay hidden.
+To cover the more complex needs of image-to-3D users, especially imaginative and diverse concept-design tasks, we curate a \textit{Conceptual Design Dataset} of 2{,}396 in-the-wild reference images under-served by existing 3D priors.
+We hold out 100 references for evaluation and use the remaining 2{,}296 for training. OREO uses these images alone and requires no paired 3D ground truth.
+Curation and filtering details are in the \emph{Supp.\ Material}.
+For a general-distribution reference, we additionally evaluate on Google Scanned Objects (GSO)~\cite{downs2022google}.
 
-\begin{figure*}[t]
+\textbf{Implementation Details.}
+We use Trellis~\cite{xiang2025structured} as the 3D backbone and Qwen-Image-Edit~\cite{wu2025qwen} for Reinforced Editing, whose hyper-parameters are given in Sec.~\ref{sec:exp_feedback}.
+Training details are provided in the \emph{Supp.\ Material}.
+
+\begin{figure*}[!tbp]
     \centering
     \includegraphics[width=\textwidth]{figures_final/OREO_Edit_Comparisonv2_cropped.pdf}
-    \caption{Qualitative comparison of different 2D feedback sources used for pseudo-GT generation.}
+    \caption{\textbf{Qualitative comparison of 2D feedback sources.} An ideal $x^{\texttt{tgt}}$ keeps the viewpoint of $x^{\texttt{src}}$ but lifts its fidelity toward $x^{\texttt{ref}}$; we compare Reinforced Editing (Ours), NanoBanana Pro, and Qwen-Image-Edit. Details are discussed in Sec.~\ref{sec:exp_feedback}.}
     \label{fig:edit_comparison}
   \end{figure*}
 
 
-\begin{table*}[t]
+\begin{table*}[!tbp]
     \centering
+    \caption{\textbf{Quantitative comparison of 2D feedback sources.} We report CLIP and DINO similarity to the reference $x^{\texttt{ref}}$ for fidelity and to the source view $x^{\texttt{src}}$ for content preservation, together with Mask IoU for viewpoint consistency. Details are in Sec.~\ref{sec:exp_feedback}.}
+    \label{tab:feedback_comparison}
     \setlength{\tabcolsep}{3pt}
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{@{}lccccc@{}}
@@ -370,104 +370,109 @@ We first validate the feedback quality of Reinforced Editing in Sec.~\ref{4_1}, 
       \cmidrule(lr){2-3}\cmidrule(lr){4-5}
       & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & \\
       \midrule
-      Baseline & 0.7408 & 0.7562 & N/A & N/A & N/A \\
+      Unedited & 0.7613 & 0.7915 & N/A & N/A & N/A \\
       \cmidrule(lr){1-6}
-      NanoBanana Pro & 0.9216 & 0.9030 & 0.8233 & 0.7720 & 0.6067 \\
-      Qwen-Edit (Orig.) & 0.9134 & 0.9002 & 0.7772 & 0.7206 & 0.5104 \\
+      NanoBanana Pro & \textbf{0.8803} & \textbf{0.9001} & 0.8199 & 0.8404 & 0.6830 \\
+      Qwen-Edit (Orig.) & 0.7753 & 0.8269 & 0.7882 & 0.8084 & 0.6374 \\
       \midrule
-      Ours & \scoredelta{0.7724}{+0.0314} & \scoredelta{0.7932}{+0.0371} & 0.9104 & 0.8986 & 0.9402 \\
+      Ours & \scoredelta{0.7992}{+0.0379} & \scoredelta{0.8214}{+0.0299} & \textbf{0.8833} & \textbf{0.9099} & \textbf{0.9520} \\
       \bottomrule
     \end{tabular}}
-    \caption{Quantitative comparison across different feedback sources.}
-    \label{tab:feedback_comparison}
   \end{table*}
 
   
-\subsection{Preliminary Analysis: Validating the Editing Feedback}
-\label{4_1}
+\subsection{Validating the Editing Feedback}
+\label{sec:exp_feedback}
 
-Before integrating the 2D editor into the 3D optimization loop, we first evaluate the quality of its feedback on a held-out 2D benchmark split that is independent from training data.
+The 3D generator is supervised by pseudo-GTs from a 2D editor, so the quality of these edits directly bounds what the 3D loop can achieve. 
+We therefore first evaluate the editor's feedback at the 2D level, before 3D training.
 
-\textbf{Test Set.}
-We collect 100 images covering imaginative and difficult user scenarios to form our \textit{Conceptual Design Dataset}, serving as reference images $x^{\texttt{ref}}$.
-To obtain the source images $x^{\texttt{src}}$, we use Trellis to generate 3D assets from these references and render 3 views at azimuth $-90^\circ$, $0^\circ$, and $90^\circ$ for each asset.
+\textbf{Evaluation Protocol.}
+For each reference in the Conceptual Design Dataset, we generate a 3D asset with Trellis and render 5 views at azimuths $-90^\circ$, $-45^\circ$, $0^\circ$, $45^\circ$, and $90^\circ$ as source views $x^{\texttt{src}}$.
+To evaluate the editing performance, we adopt three metrics.
+To measure the multi-view fidelity improvement, we compute the CLIP-ViT-L/14~\cite{radford2021learning} and DINOv3-ViT-L/16~\cite{simeoni2025dinov3} embedding similarity of each rendered view to the reference $x^{\texttt{ref}}$, and report the mean over the 5 views before and after editing. To check content preservation, we additionally report the similarity to $x^{\texttt{src}}$.
+Besides, to quantify the consistency of object pose, we use Mask IoU, with foreground masks extracted by U$^2$-Net~\cite{qin2020u2} as in Trellis.
 
 \textbf{Compared Methods.}
-We implement our Reinforced Editing (RE) algorithm using Qwen-Image-Edit as the base model, and compare it against the original Qwen-Image-Edit pipeline and NanoBanana.
+We compare our Reinforced Editing (RE) against the original Qwen-Image-Edit~\cite{wu2025qwen} pipeline and NanoBanana Pro.
+The setup for the compared methods is provided in the \emph{Supp.\ Material}.
 
 
 
 \textbf{Qualitative Analysis.}
 Fig.~\ref{fig:edit_comparison} visualizes the feedback quality. A critical challenge is maintaining both the camera perspective and content fidelity of the source view $x^{\texttt{src}}$.
-Qwen-Image-Edit often fails to respect the source viewpoint, reverting to the reference view $x^{\texttt{ref}}$ or hallucinating background elements absent from the source (e.g., the added flowers in row 3), which introduces severe geometric conflicts.
-NanoBanana also struggles with viewpoint preservation and tends to hallucinate extraneous content not present in the source view, such as text overlays and spurious background elements (e.g., the text artifacts in row 1 and the added vegetation in rows 3--4), producing unreliable supervision targets.
+NanoBanana Pro primarily fails at controlling the viewpoint: when $x^{\texttt{src}}$ differs substantially in viewpoint from $x^{\texttt{ref}}$, it tends to abandon the $x^{\texttt{src}}$ viewpoint and revert to $x^{\texttt{ref}}$.
+For instance, in row 1, $x^{\texttt{src}}$ shows the orc warrior from a side view, yet NanoBanana Pro's output snaps back to a frontal view nearly identical to $x^{\texttt{ref}}$.
+Even when the viewpoint is roughly preserved, it is not faithful to the local content of the source view, e.g., the mage's cape in row 2 is altered.
 In contrast, Reinforced Editing injects high-fidelity textures while strictly adhering to the source perspective and content layout, ensuring geometrically aligned supervision.
+Qwen-Image-Edit fails at the pose level in an even more pronounced way: the orc warrior's hand pose is altered in row 1, the mage collapses into a tilted, falling posture in row 2, and the cowgirl in row 5 is cropped from a full-body figure into a half-body portrait. 
+It also drifts on the background, which is occasionally washed to a plain gray tone.
 
 \textbf{Quantitative Results.}
-We use CLIP and DINO embedding similarity to measure semantic similarity, and Mask IoU to measure viewpoint and structural consistency.
-The \textit{Baseline} row represents the unedited rendered view $x^{\texttt{src}}$, quantifying its initial alignment with the reference $x^{\texttt{ref}}$.
-As shown in Table~\ref{tab:feedback_comparison}, baseline editors can achieve high similarity to $x^{\texttt{ref}}$ but deviate substantially from $x^{\texttt{src}}$, which is evidenced by their low Mask IoU.
+As shown in Table~\ref{tab:feedback_comparison}, the \textit{Unedited} row represents the raw rendered view $x^{\texttt{src}}$, quantifying its initial alignment with the reference $x^{\texttt{ref}}$.
+Baseline editors can achieve high similarity to $x^{\texttt{ref}}$ but deviate substantially from $x^{\texttt{src}}$, which is evidenced by their low Mask IoU.
 In contrast, RE maintains high similarity to $x^{\texttt{src}}$ while still improving semantic fidelity.
 
 
 
 \textbf{Ablation Study on RE Parameters.}
-After selecting RE as the feedback source, we further study its key hyper-parameters: the editing ratio $N_e/N$ and the absolute editing steps $N_e$, as discussed in Sec.~\ref{sec:reinforced_editing}.
-We sample 50 rendered views from the Conceptual Design Dataset evaluation split and report CLIP Similarity, DINO Similarity, and Mask IoU.
-As shown in Fig.~\ref{fig:ablation_ratio_steps}(a) and Fig.~\ref{fig:ablation_vis}(a), a low ratio (0.25) leaves the result close to $x^{\texttt{src}}$ with limited detail enhancement. Conversely, a full ratio (1.0) causes severe deviations from the source view; for example, the first-row anime character is transformed into a different image with a hallucinated background and altered clothing color, leading to identity mismatch. In contrast, a ratio of 0.75 improves texture fidelity while preserving the original silhouette and viewpoint, yielding the best semantic-structure trade-off.
-Furthermore, Fig.~\ref{fig:ablation_ratio_steps}(b) and Fig.~\ref{fig:ablation_vis}(b) show that increasing steps beyond 9 produces only marginal visual gains; the outputs at 9 and 30 steps are highly similar in detail quality.
+We further study two key hyper-parameters of RE: the editing ratio $N_e/N$ and the absolute editing steps $N_e$, as discussed in Sec.~\ref{sec:reinforced_editing}.
+As shown in Fig.~\ref{fig:ablation_ratio_steps}(a) and Fig.~\ref{fig:ablation_vis}(a), a low ratio of $0.25$ barely edits the source view: the mecha warrior in row 1 and the king in row 2 remain almost identical to $x^{\texttt{src}}$, with limited detail enhancement. 
+Conversely, a full ratio of $1.0$ causes severe deviations from the source view; the mecha warrior is rendered at a shrunken scale with an altered pose, and the king loses part of its cape and body, leading to identity mismatch. 
+In contrast, a ratio of $0.75$ improves texture fidelity while preserving the original silhouette and viewpoint. 
+This is corroborated by Fig.~\ref{fig:ablation_ratio_steps}(a): CLIP and DINO similarity rise sharply from ratio $0.25$ to $0.75$, and then degrade markedly at ratio $1.0$.
+Fig.~\ref{fig:ablation_ratio_steps}(b) shows that the primary gain concentrates between $6$ and $9$ steps, where CLIP and DINO similarity rise most steeply. 
+Beyond $9$ steps the curves quickly flatten: the semantic gains from $15$ and $30$ steps are marginal, while Mask IoU keeps dropping as extra editing further deviates from $x^{\texttt{src}}$. 
+Fig.~\ref{fig:ablation_vis}(b) visually confirms this saturation on facial details: at $9$ steps the two female characters already exhibit sharp facial features, such as clearly resolved eyes and skin shading; increasing steps to $15$ or $30$ yields fewer perceptible improvements in the face regions.
 Therefore, we adopt $N_e=9$, $N=12$ in all subsequent 3D experiments for a better quality-efficiency balance.
 
-\begin{figure}[t]
+\begin{figure}[!tbp]
   \centering
   \includegraphics[width=\linewidth]{figures_rebuttal/comparison_grid.png}
-  \caption{\textcolor{red}{\textbf{Visualization of editing trajectories with and without the source branch.}
-  Removing the source branch in Eq.~\ref{eq:red_diff_velocity} leads to progressive color over-saturation and degraded local structures. With the branch, the trajectory remains stable and fine-grained details are well preserved.}}
+  \caption{\textbf{Editing trajectories with and without the source branch.} Removing the source branch (top) leads to progressive color over-saturation and structural drift; keeping it (bottom, Ours) stabilizes the trajectory. Details in Sec.~\ref{sec:exp_feedback}.}
   \label{fig:neg_src_guidance}
 \end{figure}
 
-\textcolor{red}{\textbf{Effect of the Source Branch.}
-As shown in Fig.~\ref{fig:neg_src_guidance}, removing the source branch in Eq.~\ref{eq:red_diff_velocity} leads to color over-saturation and structural degradation, while the full formulation stabilizes the trajectory and preserves fine details.
-Quantitatively, Table~\ref{tab:ablation_components} confirms that the source branch improves structural consistency (Mask IoU: \texttt{TODO} $\rightarrow$ \texttt{TODO}) while maintaining semantic similarity.}
+\textbf{Ablation Study on RE Components.}
+RE builds on two key components, the source branch in Eq.~\ref{eq:red_diff_velocity} and the dynamic noise update in Eq.~\ref{eq:red_dynamic_noise}, and we ablate each in turn to see how much it contributes.
+Without the source branch, only the target-conditioned velocity is used, and the trajectory drifts away from $x^{\texttt{src}}$: Fig.~\ref{fig:neg_src_guidance} shows the resulting color over-saturation and structural degradation, and Table~\ref{tab:ablation_components} reports negative $\Delta$CLIP and $\Delta$DINO, meaning the edited output is even less faithful to $x^{\texttt{ref}}$ than the unedited source.
+Without the noise update, the per-step $\epsilon$ is resampled at random and no longer aligned with the conditional CFG direction, diluting the edit signal in the target--unconditional delta. Table~\ref{tab:ablation_components} shows $\Delta$CLIP and  $\Delta$DINO dropping to nearly zero, so the edit is applied but barely takes effect.
+We evaluate whether these 2D-level benefits transfer to the downstream 3D generator in the next section.
 
-\begin{table}[t]
+\begin{table}[!tbp]
   \centering
-  \textcolor{red}{\caption{Ablation study on key components of Reinforced Editing. We evaluate on the Conceptual Design Dataset with CLIP Similarity, DINO Similarity, and Mask IoU.}
+  \caption{\textbf{Ablation on key components of Reinforced Editing.} We report $\Delta$CLIP and $\Delta$DINO, defined as the change in CLIP/DINO similarity to $x^{\texttt{ref}}$ before and after editing; higher is better. Details are in Sec.~\ref{sec:exp_feedback}.}
   \label{tab:ablation_components}
-  \begin{tabular}{@{}lccc@{}}
+  \begin{tabular}{@{}lcc@{}}
     \toprule
-    Variant & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & IoU $\uparrow$ \\
+    Variant & $\Delta$CLIP Sim. $\uparrow$ & $\Delta$DINO Sim. $\uparrow$ \\
     \midrule
-    Full (Ours) & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} \\
-    w/o Source Branch & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} \\
-    w/o Noise Update & \texttt{TODO} & \texttt{TODO} & \texttt{TODO} \\
+    Full (Ours) & \textbf{+0.0379} & \textbf{+0.0299} \\
+    w/o Source Branch & $-0.0523$ & $-0.0497$ \\
+    w/o Noise Update & $-0.0001$ & $+0.0089$ \\
     \bottomrule
-  \end{tabular}}
+  \end{tabular}
 \end{table}
 
-\textcolor{red}{\textbf{Effect of Noise Update.}
-Removing the dynamic noise update (Eq.~\ref{eq:red_dynamic_noise}) weakens the editing strength, as the randomly sampled noise introduces stochasticity that dilutes the conditional guidance signal.
-As shown in Table~\ref{tab:ablation_components}, the noise update improves \texttt{TODO}, confirming its role in strengthening the editing effect.}
 
-
-\begin{figure*}[t]
+\begin{figure*}[!tbp]
   \centering
-  \includegraphics[width=\textwidth]{figures/plots/ablation_ratio_steps.png}
+  \includegraphics[width=\textwidth]{figures_final/ablation_ratio_steps.png}
   \caption{Sensitivity Analysis of RE Parameters. (a) \textbf{Effect of Editing Ratio ($N_e/N$)}: A ratio of 0.75 yields the best trade-off between semantic improvement (CLIP/DINO $\Delta$) and structural consistency (Mask IoU). (b) \textbf{Effect of Editing Steps ($N_e$)}: Under a fixed ratio ($\approx 0.75$), fewer steps (e.g., 9) achieve comparable performance to more expensive settings (e.g., 30) with significantly lower cost.}
   \label{fig:ablation_ratio_steps}
 \end{figure*}
 
-\begin{figure*}[t]
+\begin{figure*}[!tbp]
   \centering
   \begin{subfigure}[b]{\textwidth}
     \centering
-    \includegraphics[width=\textwidth]{\detokenize{figures/OREO Ratio.drawiov2.png}}
+    \includegraphics[width=\textwidth]{figures_final/OREO_Ratiov2.pdf}
     \caption{Effect of Editing Ratio ($N_e/N$)}
   \end{subfigure}
   \par\smallskip
   \begin{subfigure}[b]{\textwidth}
     \centering
-    \includegraphics[width=\textwidth]{\detokenize{figures/OREO Visualization.drawiov2.png}}
+    \includegraphics[width=\textwidth]{figures_final/OREO_Stepsv2.pdf}
     \caption{Effect of Editing Steps ($N_e$)}
   \end{subfigure}
   \caption{Qualitative ablation study on RE parameters. (a) \textbf{Editing Ratio}: A low ratio (e.g., 0.25) limits editing capability, while a full ratio (1.0) destroys the original structure. Our choice of 0.75 strikes a balance. (b) \textbf{Editing Steps}: Increasing steps from 9 to 30 yields negligible visual improvement, confirming the efficiency of our setting.}
@@ -475,137 +480,100 @@ As shown in Table~\ref{tab:ablation_components}, the noise update improves \text
 \end{figure*}
 
 \subsection{Main Results}
-\label{4_2}
+\label{sec:exp_main}
 
-Having validated the effectiveness of Reinforced Editing in providing structure-preserving feedback, we now integrate it into the 3D optimization loop.
-In this section, we evaluate the end-to-end performance of OREO, focusing on its ability to enhance the visual fidelity of 3D assets while maintaining the geometric integrity of the pre-trained backbone.
+\textbf{Experimental Setup.}
+We evaluate the 3D generation quality of Trellis distilled with OREO. 
+As baselines, we compare against the pre-trained Trellis and Photo3D, a related post-training work built on the same Trellis backbone. 
+Following the protocol in Sec.~\ref{sec:exp_feedback}, we render 5 views at azimuths $-90^\circ, -45^\circ, 0^\circ, 45^\circ, 90^\circ$ for each reference and report CLIP-ViT-L/14~\cite{radford2021learning} and DINOv3-ViT-L/16~\cite{simeoni2025dinov3} embedding similarity to the reference $x^{\texttt{ref}}$, averaged over the 5 views. 
+In addition to our proposed Conceptual Design Dataset, which targets imaginative and out-of-distribution references, we further validate on GSO~\cite{downs2022google}, an in-distribution benchmark of common real-world objects, to verify that OREO does not compromise generation quality on the pre-trained model's original distribution.
 
-\textbf{Setup.}
-We utilize Trellis as the 3D generator backbone and Qwen-Image-Edit as the 2D editor.
-\textcolor{red}{To evaluate post-training under image-only supervision without 3D ground truth, we build a training set with \texttt{TODO: number of training images} images collected from online sources, filtered for \texttt{TODO: filtering criteria}, where no paired 3D GT is available.
-For evaluation, we use the \texttt{TODO: evaluation split size}-example \textit{Conceptual Design Dataset} introduced in Sec.~\ref{4_1}.}
-We compare OREO against the pre-trained baseline and Photo3D. For a fair comparison, we implement Photo3D using the same Trellis backbone and train it on the same in-the-wild training set; the Conceptual Design Dataset is used only for evaluation.
-\textcolor{red}{Detailed dataset construction, editing prompts, and training-time profiling are provided in the Supplementary Material.}
+\textbf{Quantitative and Qualitative Evaluation.}
+Table~\ref{tab:main_results} summarizes the quantitative comparison. OREO achieves clear gains in CLIP and DINO similarity on the Conceptual Design Dataset, our target imaginative distribution. In contrast, the improvement on the in-distribution GSO benchmark is marginal, indicating that OREO's fidelity gain is targeted: on distributions that are not part of the training references, OREO preserves the pre-trained model's original quality rather than compromising it.
+Fig.~\ref{fig:qualitative_comparison} shows the visual comparison. Compared with the pre-trained Trellis and Photo3D, OREO recovers finer appearance details while preserving the geometric structure and identity cues of $x^{\texttt{ref}}$. For example, OREO reconstructs the eye and spotted feather patterns on the parrot, the twisted tree trunk shape in the courtyard, and more consistent back-view colors on the minotaur.
 
-\textbf{Quantitative Evaluation.}
-We evaluate four metrics: CLIP Similarity for semantic alignment with the input reference, DINO Similarity for structural consistency, and MANIQA/MUSIQ for no-reference perceptual quality.
-Table~\ref{tab:main_results} reports results for Pretrained, Photo3D, and OREO.
-Compared with Pretrained, OREO improves all metrics (CLIP: 0.7404 $\rightarrow$ 0.7501, DINO: 0.7573 $\rightarrow$ 0.7629, MANIQA: 0.2900 $\rightarrow$ 0.3088, MUSIQ: 54.29 $\rightarrow$ 55.21), showing consistent gains in semantic faithfulness and perceptual quality.
-Against Photo3D, OREO achieves the best CLIP Similarity and MANIQA, while Photo3D is higher on DINO Similarity and MUSIQ.
-This result indicates a clear trade-off: Photo3D favors global feature consistency and smooth perceptual quality, whereas OREO better preserves reference-specific semantics and fine-grained texture realism.
-The trend is consistent with our design: OREO relies on on-the-fly adaptive pseudo-GT supervision from editing priors, while Photo3D is an offline pipeline without adaptive pseudo-GT updates and is therefore more dependent on fixed training targets.
-\textcolor{red}{We additionally evaluate OREO on Toy4K following the official Trellis protocol; the full benchmark results and metric details are provided in the Supplementary Material.}
+\textbf{User Preference Study.}
+To complement the automatic metrics, we further conduct a user preference study on the same held-out Conceptual Design Dataset, in which participants compare multi-view renderings from Pretrained Trellis, Photo3D, and OREO under blinded conditions.
+OREO obtains the highest preference ratio, indicating that human evaluators more frequently favor its balance between reference fidelity, fine-grained detail, and multi-view consistency.
+Full protocols and results are in the \emph{Supp.\ Material}.
 
-
-
-\begin{table}[tb]
+\begin{table}[!tbp]
   \centering
-  \caption{Quantitative comparison on the Conceptual Design Dataset. We report CLIP Similarity (conceptual alignment), DINO Similarity (structural consistency), and MANIQA/MUSIQ (no-reference perceptual quality).}
+  \caption{\textbf{Main quantitative comparison of 3D generation.} We report CLIP and DINO similarity to the reference $x^{\texttt{ref}}$ on the Conceptual Design Dataset and GSO. Details are in Sec.~\ref{sec:exp_main}.}
   \label{tab:main_results}
   \begin{tabular}{@{}lcccc@{}}
     \toprule
-    Method & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & MANIQA $\uparrow$ & MUSIQ $\uparrow$ \\
+    \multirow{2}{*}{Method} & \multicolumn{2}{c}{Conceptual Design} & \multicolumn{2}{c}{GSO} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+     & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ \\
     \midrule
-    Pretrained & 0.7404 & 0.7573 & 0.2900 & 54.29 \\
-    Photo3D & 0.6994 & 0.7485 & 0.2911 & \textbf{58.96} \\
-    OREO (Ours) & \textbf{0.7501} & \textbf{0.7629} & \textbf{0.3088} & 55.21 \\
+    Trellis & 0.7613 & 0.7916 & 0.7722 & 0.7022 \\
+    Photo3D & 0.7380 & 0.7837 & 0.7512 & 0.7034 \\
+    OREO (Ours) & \textbf{0.7834} & \textbf{0.8065} & \textbf{0.7764} & \textbf{0.7069} \\
     \bottomrule
   \end{tabular}
 \end{table}
 % \begin{itemize}
-%     \item \textbf{Conceptual Alignment}: The higher CLIP score shows that OREO more effectively transfers concept cues from the edited pseudo-GTs to the 3D generator, consistent with the improved feedback quality observed in Section~\ref{4_1}.
+%     \item \textbf{Conceptual Alignment}: The higher CLIP score shows that OREO more effectively transfers concept cues from the edited pseudo-GTs to the 3D generator, consistent with the improved feedback quality observed in Section~\ref{sec:exp_feedback}.
 %     \item \textbf{Structural Consistency}: The gain in DINO score suggests that OREO enhances texture and appearance details without sacrificing global structure, matching our design goal of realism enhancement under geometry preservation.
 %     \item \textbf{Overall Effect}: These quantitative gains align with the qualitative comparisons in Fig.~\ref{fig:qualitative_comparison}, where OREO produces clearer details and more coherent multi-view results than the baseline.
 % \end{itemize}
-
-
-
-\textbf{Qualitative Evaluation.}
-As shown in Fig.~\ref{fig:qualitative_comparison}, the pre-trained baseline often produces over-smoothed appearances and weak local details. OREO consistently recovers clearer material boundaries and richer textures while preserving object structure and identity cues from the input reference.
-For example, in the third row, OREO accurately captures the character's eye gaze and facial expression, whereas Photo3D generates a distorted face with unnatural eyes, altering the character's identity.
-Similarly, in the second row, Photo3D breaks the geometric structure of the chair legs, while OREO maintains structural integrity.
-Overall, OREO provides a better trade-off between perceptual realism and semantic faithfulness, which is consistent with its adaptive on-the-fly pseudo-GT supervision.
-\textcolor{red}{A human preference study further confirms OREO's visual advantage, with full details in the Supplementary Material.}
-
-
-\begin{figure*}[t]
-  \centering
-  \includegraphics[width=\textwidth]{\detokenize{figures/OREO Comparison.drawio.png}}
-  \caption{Qualitative comparison among Pretrained, Photo3D, and OREO on in-the-wild inputs. Compared with both baselines, OREO yields clearer boundaries and richer textures while better preserving structural integrity and identity-consistent semantics from the reference image.}
-  \label{fig:qualitative_comparison}
-\end{figure*}
 % \begin{itemize}
 %     \item \textbf{Geometric Repair}: In the case of "Cyberpunk style mechanical prosthetic limbs", the original Trellis often generated blurred structures, while OREO successfully restored clear joint and pipeline details.
 %     \item \textbf{Texture Enhancement}: For "Magic book with glowing runes", the textures generated by OREO were not only clearer but also had lighting effects more consistent with the prompt description, eliminating the oversaturation problem common in SDS.
 %     \item \textbf{Multi-view Consistency}: Although FlowEdit guides on a single view, thanks to the inherent consistency of the 3D generator, the assets generated by OREO maintained structural coherence across all views, without obvious Janus problems.
 % \end{itemize}
 
-\subsection{Ablation Study and Analysis}
-\label{4_3}
-
-To clearly analyze implementation choices, all ablation variants use the same Trellis backbone, training split, optimization schedule, and the same held-out 100-example test set; each variant changes only one component at a time.
-Specifically, ``w/o Regularization'' removes $\mathcal{L}_{reg}$, ``w/o Noise Update'' removes the dynamic noise update in Eq.~\ref{eq:red_dynamic_noise}, and ``replace MSE with DMD'' replaces our default direct pseudo-GT supervision with a score-distillation style objective.
-\textcolor{red}{Full OREO also includes an auxiliary adversarial term to better transfer high-frequency details from the edited pseudo-GTs beyond pixel-level regression; discriminator and training details are provided in the Supplementary Material.}
-As shown in Table~\ref{tab:ablation_quantitative}, all three variants underperform Full OREO, and removing regularization already causes a consistent drop across CLIP, DINO, MANIQA, and MUSIQ, validating that geometry anchoring is necessary during post-training.
-
-\begin{figure*}[t]
+\begin{figure*}[!tbp]
   \centering
-  \includegraphics[width=\textwidth]{\detokenize{figures/OREO Ablation v2.drawio.png}}
-  \caption{Ablation analysis of OREO components and training strategies.}
+  \includegraphics[width=\textwidth]{figures_final/mv_comparison_final.png}
+  \caption{\textbf{Main qualitative comparison of 3D generation.} OREO delivers higher multi-view visual fidelity than Trellis and Photo3D. Details are in Sec.~\ref{sec:exp_main}.}
+  \label{fig:qualitative_comparison}
+\end{figure*}
+
+\subsection{Ablation Study and Analysis}
+\label{sec:exp_ablation}
+
+Full OREO's training scheme rests on three designs. First, the rollout is \emph{on-policy}: the anchor $\hat{z}_0$ is derived from the training generator's own current output $G_\theta(x^{\texttt{ref}})$. Second, supervision is applied in the latent space via a contrastive objective, bypassing the differentiable renderer. Third, the contrastive target is built from an explicit multi-step pseudo-GT produced by Reinforced Editing. We ablate them with three variants: \emph{w/ Off-policy Rollout} freezes the rollout to $G_{\theta_{pre}}(x^{\texttt{ref}})$; \emph{w/ Pixel-MSE Supervision} regresses in pixel space; \emph{w/ DMD} drops the explicit target and instead uses a single-step score-distillation gradient. Table~\ref{tab:ablation_quantitative} shows all three fall below the pretrained Trellis baseline while Full OREO improves over it.
+
+\begin{figure*}[!tbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures_final/mv_ablation_final.png}
+  \caption{\textbf{Qualitative ablation of the 3D generator design choices.} We compare Full OREO against other training variants. Details are in Sec.~\ref{sec:exp_ablation}.}
   \label{fig:ablation_overview}
 \end{figure*}
 
-\begin{table}[t]
+\begin{table}[!tbp]
   \centering
-  \caption{Quantitative ablation study. We report CLIP Sim. and DINO Sim. to measure semantic and structural alignment, respectively, together with MANIQA and MUSIQ for perceptual quality.}
+  \caption{\textbf{Ablation on the design choices of the 3D generator.} We report CLIP and DINO similarity to the reference $x^{\texttt{ref}}$ on the Conceptual Design Dataset. Details are in Sec.~\ref{sec:exp_ablation}.}
   \label{tab:ablation_quantitative}
-  \begin{tabular}{@{}lcccc@{}}
+  \begin{tabular}{@{}lcc@{}}
     \toprule
-    Method / Variant & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ & MANIQA $\uparrow$ & MUSIQ $\uparrow$ \\
+    Method / Variant & CLIP Sim. $\uparrow$ & DINO Sim. $\uparrow$ \\
     \midrule
-    \textbf{Full OREO (Ours)} & \textbf{0.7501} & \textbf{0.7629} & \textbf{0.3088} & \textbf{55.21} \\
-    w/o Regularization & 0.7401 & 0.7561 & 0.2900 & 54.29 \\
-    w/o Noise Update & 0.7235 & 0.7343 & 0.2943 & 54.12 \\
-    replace MSE with DMD & 0.7101 & 0.7068 & 0.2890 & 51.57 \\
+    Pretrained Trellis & 0.7613 & 0.7916 \\
+    \midrule
+    \textbf{Full OREO (Ours)} & \textbf{0.7834} & \textbf{0.8065} \\
+    w/ Pixel-MSE Supervision & 0.6617 & 0.6982 \\
+    w/ Off-policy Rollout & 0.7279 & 0.7613 \\
+    w/ DMD (Score Distillation) & 0.5393 & 0.5486 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\textbf{Effectiveness of Noise Update.}
-We evaluate the dynamic noise update in Eq.~\ref{eq:red_dynamic_noise} by removing it during training.
-As shown in Table~\ref{tab:ablation_quantitative}, the variant without noise update drops from 0.7501 to 0.7235 in CLIP and from 0.7629 to 0.7343 in DINO, with consistent degradation in MANIQA and MUSIQ.
-Qualitatively, as illustrated in Fig.~\ref{fig:ablation_overview}, removing the noise update leads to noticeable color shifts and washed-out textures.
-For instance, the leopard-print armor in row 1 loses its distinctive pattern, and the golden armor of the monkey warrior in row 3 becomes desaturated and less detailed compared to Full OREO.
-The effect is especially pronounced on objects with emissive or metallic materials: the mech in row 5 loses its cyan glow accents completely, and the anime character's ornate armor engravings in row 6 become blurred and less vibrant.
-This confirms that the noise update stabilizes the editing trajectory and provides more reliable pseudo-GT supervision for identity-preserving optimization.
+\textbf{Degradation under Off-policy Rollout.} Freezing the rollout to $z_0=G_{\theta_{pre}}(x^{\texttt{ref}})$ decouples the anchor from the training generator's own trajectory. Training itself remains stable, and the geometric structure is largely preserved as shown in Fig.~\ref{fig:ablation_overview}, but colors desaturate and fine-grained textures are progressively smoothed out. For example, the multi-color glazed roof in row~1 loses its saturation, and the mecha in row~3 fades into a muted red-blue palette. Quantitatively, CLIP and DINO similarity drop by $0.0555$ and $0.0452$ relative to Full OREO, and both metrics fall below the pretrained baseline.
 
 
-\textbf{Guidance Through Score Distillation.}
-We further compare our default pseudo-GT supervision with a score-distillation style objective by replacing MSE with DMD, which is among the most effective score distillation methods.
-As shown in Table~\ref{tab:ablation_quantitative}, DMD leads to the worst scores among all variants.
-The visual degradation is even more striking in Fig.~\ref{fig:ablation_overview}: DMD outputs exhibit severely blurred textures and muddy color tones across all examples.
-In row 1, the armored character degrades into a near-unrecognizable dark mass with completely lost structural details; in row 4, the rock golem's distinctive rocky surface is reduced to a smooth, featureless blob.
-The gap is further amplified on complex objects: the mech in row 5 collapses into an amorphous shape where all metallic panels and glowing accents vanish, and the anime character in row 6 suffers from severe color bleeding with its cyan hair and golden armor merging into a murky greenish tone.
-In contrast, Full OREO preserves crisp material boundaries and fine-grained textures across all cases.
-We attribute this gap to a fundamental difference in how guidance is extracted from the 2D diffusion model.
-Score distillation computes a single-step gradient by querying the 2D model at one noise level, yielding a noisy estimate of the update direction rather than an explicit supervision target.
-Because each gradient only captures a local view of the 2D prior at one particular noise scale, the accumulated guidance over training tends to be high-variance and can introduce artifacts.
-In contrast, our Reinforced Editing iterates the 2D model over $N_e{=}9$ denoising steps to produce a fully refined pseudo-GT $x^{\texttt{tgt}}$.
-This multi-step process allows the editing prior to progressively resolve ambiguities and inject coherent fine-grained details layer by layer, rather than relying on a single noisy gradient snapshot.
-The resulting pseudo-GT serves as an explicit pixel-level supervision target, providing substantially richer and more stable guidance than a per-step gradient direction.
-This analysis suggests that, in the post-training setting where structure-preserving refinement is the goal, constructing high-quality explicit targets via multi-step editing is more effective than distilling implicit gradient signals.
+\textbf{Attenuation of Gradient through Differentiable Rendering.} Replacing the latent contrastive loss with a pixel-space regression $\|x^{\texttt{src}}-x^{\texttt{tgt}}\|^2$ forces the gradient back through the frozen decoder $\mathcal{D}$ and renderer $\mathcal{P}$ before reaching $v_\theta$. Training does not diverge, but the attenuated gradient can no longer drive fidelity improvement, and the outputs drift toward a texture-averaged, color-shifted solution. The roof in row~1 turns uniformly beige and the excavator robot in row~2 fades into washed-out white. CLIP and DINO similarity fall to $0.6617$/$0.6982$, well below the pretrained baseline, as shown in Fig.~\ref{fig:ablation_overview}.
+
+
+\textbf{Necessity of Reinforced Editing.} Rather than construct an explicit pseudo-GT, DMD supplies the training generator with a single-step score-distillation gradient obtained from the frozen 2D editor. Without a multi-step edited target, the gradient captures only a local view of the 2D prior at one noise scale, and the accumulated update over training is high-variance and directionally inconsistent. Fig.~\ref{fig:ablation_overview} shows the resulting outputs suffer from severe geometric distortion and color collapse, e.g., the mecha in row~3 loses its structural coherence entirely. CLIP and DINO similarity collapse to $0.5393$/$0.5486$, the worst among all variants, confirming that a coherent multi-step target from RE cannot be replaced by an implicit gradient signal.
 
 \section{Conclusion}
 This paper proposes \textbf{OREO}, a fidelity alignment framework for 3D generation.
 Addressing the lack of visual realism in existing 3D models, we introduce an on-the-fly optimization loop that leverages 2D diffusion priors.
 At its core, we propose Reinforced Editing to generate structure-preserving pseudo-GTs, which serve as dynamic supervision targets.
-Experimental results demonstrate that OREO effectively enhances the visual fidelity and texture details of 3D generators while maintaining geometric integrity, offering a scalable solution to bridge the gap between 3D geometry and 2D visual realism.
-
-\textcolor{red}{\textbf{Limitations.}
-OREO inherits its appearance guidance from 2D editing priors, and thus may also inherit their compositional or viewpoint biases in rare cases.
-For face-like objects or characters, the 2D editor may rotate the face toward the camera instead of preserving the intended 3D-facing direction, leading to view-dependent orientation inconsistency.
-Similar biases can also appear as color/style shifts on unusual materials or weakly constrained back views.
-We provide additional failure-case analysis in the Supplementary Material.}
+Experimental results demonstrate that OREO effectively enhances the visual fidelity and texture details of 3D generators while maintaining geometric integrity, offering a scalable solution to bridge the gap between 3D geometry and 2D visual realism. Limitations are provided in the \emph{Supp.\ Material}.
 
 \textbf{Future Work.} Although OREO performs well, there is still room for further exploration. First, the current FlowEdit process has high inference costs; future work could explore more efficient distillation strategies (e.g., one-step editing). Second, we will attempt to extend OREO to more complex scene generation tasks, utilizing panoramic editing models to optimize large-scale 3D environments. Finally, combining with Large Multimodal Models (LMM) for more fine-grained interactive editing is also an exciting direction.
 

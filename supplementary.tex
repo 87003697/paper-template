@@ -52,35 +52,116 @@
 \section{Overview}
 In this supplementary material, we provide:
 \begin{itemize}
-  \item Section~\ref{sec:negative_source_guidance}: Trajectory visualization and analysis of negative source guidance in Reinforced Editing.
-  \item Section~\ref{sec:human_study_details}: Comprehensive protocols and setup for our human preference study.
-  \item Section~\ref{sec:implementation_details}: Dataset construction, editing prompts, training/inference computational overhead, GSO benchmark evaluation, and adversarial training details.
-  \item Section~\ref{sec:limitations_failure}: Additional discussion on failure cases and limitations.
+  \item Section~\ref{sec:implementation_details}: Dataset construction, training details, and editing setup for compared methods.
+  \item Section~\ref{sec:user_study_details}: Comprehensive protocols and setup for our user preference study.
+  \item Section~\ref{sec:computational_overhead}: Computational overhead of the editing component during OREO post-training.
+  \item Section~\ref{sec:limitations_failure}: Discussion on failure cases and limitations.
 \end{itemize}
 
 % ---------------------------------------------------------------
-\section{Analysis of Negative Source Guidance}
-\label{sec:negative_source_guidance}
+\section{Implementation and Dataset Details}
+\label{sec:implementation_details}
+This section provides the implementation details used in our main experiments, including dataset construction, training hyper-parameters, and the editing setup for the compared methods.
 
-\begin{figure}[t]
+\subsection{Conceptual Design Dataset Construction}
+\label{sec:dataset_construction}
+We construct an image-only collection to support generator post-training without paired 3D supervision.
+The dataset comprises 2,396 concept-design reference images that we manually curate from public online sources; most images are AI-generated or user-shared creations posted on public content platforms, reflecting the imaginative and stylized inputs that image-to-3D users bring in practice.
+We prioritize references with clean foregrounds, well-defined silhouettes, and informative texture or material cues, and manually filter the collection to remove duplicates, low-resolution thumbnails, watermarked images, and content with unclear foregrounds.
+We will release the dataset on our project page.
+
+\subsection{Training Details}
+\label{sec:training_details}
+We post-train the Trellis-image-large 3D generator with OREO on the Conceptual Design Dataset training split, using Qwen-Image-Edit-2511~\cite{wu2025qwen} as the frozen 2D editor.
+
+\textbf{Optimization.}
+We use the Adan optimizer with learning rate $10^{-4}$, weight decay $0$, and $\epsilon=10^{-4}$.
+Training runs in \texttt{bf16} mixed precision, with a per-GPU batch size of $1$ and no gradient accumulation, giving an effective batch size of $8$ reference images per iteration.
+We train for $10$ epochs over the Conceptual Design Dataset training split.
+The full-parameter update mode is applied to the sparse-latent flow-matching branch of Trellis, while the sparse-structure branch and the decoder $\mathcal{D}$ remain frozen.
+
+\textbf{Rollout and camera sampling.}
+Each iteration performs an on-policy ODE rollout with the current student generator to obtain a clean latent $z_0 = G_\theta(x^{\texttt{ref}})$.
+For every reference we sample a single training view with yaw uniformly drawn from $[0^\circ, 360^\circ]$, pitch fixed at $0^\circ$, camera distance $r=2.0$, and field of view $40^\circ$.
+The camera distance is further adjusted by an adaptive-distance rule (fill ratio $0.9$) so that the object occupies a consistent silhouette across scales.
+Rendering uses the Gaussian-splatting renderer at $1024\times1024$ resolution with a white background.
+
+\textbf{Loss and time-step sampling.}
+For the contrastive objective in Eq.~13 of the main paper, the training time step is sampled from $t \sim \mathcal{U}(0.02, 0.98)$, and the pretrained-generator forward passes for $z_0^{+}$ and $z_0^{-}$ share the same fresh noise draw $\epsilon'$ and are computed without classifier-free guidance, i.e., a single conditional forward pass under $x^{\texttt{tgt}}$ and $x^{\texttt{src}}$ respectively.
+The total loss is $\mathcal{L}_{total} = \mathcal{L}_{contrast} + \lambda\,\mathcal{L}_{reg}$, with $\lambda = 1.0$.
+The velocity regularizer $\mathcal{L}_{reg}$ compares the student and pretrained velocity fields at the same $(z_t, t, x^{\texttt{ref}})$.
+
+\subsection{Editing Setup for Compared Methods}
+\label{sec:editing_setup}
+Reinforced Editing and the off-the-shelf 2D editors used as baselines share the same underlying editor backbone but differ in their text-conditioning interface.
+Both prompt families are fixed across the entire dataset to avoid per-example prompt tuning.
+
+\textbf{Reinforced Editing.}
+We instantiate Reinforced Editing on top of Qwen-Image-Edit-2511 with $N=12$ total time steps and $N_e=9$ editing steps applied at the last portion of the schedule (editing ratio $0.75$).
+The target branch uses classifier-free guidance with scale $w=4$, while the source branch is an unconditional forward pass, in accordance with Eq.~7 of the main paper.
+The shared noise $\epsilon$ is initialized once per view and updated at each step by injecting the CFG signal, as in Eq.~8 of the main paper.
+The editing resolution matches the renderer at $1024\times1024$.
+The text component of $c^{\texttt{ref}}$ is:
+\begin{quote}
+\itshape
+``Rotate the camera. White background.''
+\end{quote}
+
+\textit{Prompt selection.}
+We arrived at this two-phrase instruction after sweeping alternative prompts on the Conceptual Design Dataset, holding the editor and all other RE hyper-parameters fixed.
+Table~\ref{tab:prompt_ablation} groups representative candidates by intent.
+Fidelity-only prompts do not disambiguate the viewpoint role of $x^{\texttt{src}}$ and yield only modest CLIP/DINO gains; underspecified viewpoint prompts (e.g., \textit{Move the camera}) improve on this but still trail the ``rotate'' formulation; asking for a full 3D reinterpretation (\textit{Generate a 3D model of the image}) actively degrades fidelity, turning the CLIP delta negative.
+``\textit{Rotate the camera}'' strikes the best balance because it signals a novel view of the \emph{same} object without over-specifying azimuth or elevation, which we found in preliminary trials to trigger hallucinated backgrounds around the requested viewpoint.
+Adding ``\textit{White background}'' further improves both deltas by aligning the pseudo-GT with the 3D backbone's white-background rendering convention; without it, the editor occasionally fills in scene backgrounds absent from $x^{\texttt{src}}$ (studio lighting, ground planes, vegetation), leaking pixel-level supervision into the generator.
+Additional stylistic modifiers on top (\textit{Consistent Lightening}, \textit{visual style}, \textit{concept design}) do not consistently help, so we adopt the minimal two-phrase form.
+
+\begin{table}[t]
   \centering
-  \includegraphics[width=\linewidth]{figures_rebuttal/comparison_grid.png}
-  \caption{\textbf{Editing trajectories with and without negative source guidance.}
-  Starting from the same rendered source view $x^{\texttt{src}}$ and reference image $x^{\texttt{ref}}$, we visualize intermediate editing states and the final output.
-  Without negative source guidance, the trajectory exhibits unstable global color changes and weaker local structures.
-  With negative source guidance, Reinforced Editing stabilizes the reference-guided trajectory while preserving local details such as the helmet mark.}
-  \label{fig:negative_source_guidance}
-\end{figure}
+  \caption{Prompt selection for Reinforced Editing on the Conceptual Design Dataset. All entries share the same editor and RE hyper-parameters ($N=12$, $N_e=9$, $w=4$); we report $\Delta$CLIP / $\Delta$DINO similarity to $x^{\texttt{ref}}$ relative to the unedited $x^{\texttt{src}}$, and Mask IoU with $x^{\texttt{src}}$. \textbf{Bold} row is our final choice.}
+  \label{tab:prompt_ablation}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    Prompt & $\Delta$CLIP $\uparrow$ & $\Delta$DINO $\uparrow$ & IoU $\uparrow$ \\
+    \midrule
+    \multicolumn{4}{@{}l}{\textit{Fidelity-only}} \\
+    Super resolution of the input image           & +0.0209 & +0.0371 & 0.9398 \\
+    Enrich the detail given the reference image   & +0.0171 & +0.0250 & 0.9469 \\
+    Add the appearance of image 1                 & +0.0233 & +0.0346 & 0.9406 \\
+    \midrule
+    \multicolumn{4}{@{}l}{\textit{Viewpoint change}} \\
+    Move the camera                                & +0.0277 & +0.0398 & 0.9406 \\
+    Obtain another side view                       & +0.0250 & +0.0341 & 0.9330 \\
+    Generate a novel view                          & +0.0161 & +0.0264 & 0.9437 \\
+    Move the camera to a novel view                & +0.0268 & +0.0387 & 0.9408 \\
+    \midrule
+    \multicolumn{4}{@{}l}{\textit{Full 3D reinterpretation}} \\
+    Generate a 3D model of the image               & $-0.0274$ & +0.0062 & 0.9455 \\
+    \midrule
+    \multicolumn{4}{@{}l}{\textit{``Rotate the camera'' variants}} \\
+    Rotate the camera                              & +0.0314 & +0.0371 & 0.9402 \\
+    Rotate the camera. Consistent Lightening       & +0.0204 & +0.0357 & 0.9417 \\
+    Rotate the camera. Consistent visual style     & +0.0206 & +0.0310 & 0.9428 \\
+    Rotate the camera. Consistent concept design   & +0.0265 & +0.0316 & 0.9422 \\
+    \textbf{Rotate the camera. White background.}\ (Ours) & \textbf{+0.0339} & \textbf{+0.0387} & \textbf{0.9411} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
-Fig.~\ref{fig:negative_source_guidance} illustrates the role of the negative source branch in the Reinforced Editing differential velocity defined in the main paper.
-When the branch is removed, the editing trajectory becomes less stable: colors are rapidly over-saturated, and local structures become weaker, as shown by the missing ``A'' on the helmet.
-With the negative source branch, the reference-guided enhancement proceeds more smoothly and maintains more stable local markings throughout the trajectory.
-This supports our use of the branch as an auxiliary regularizer for producing reliable pseudo-GTs during closed-loop 3D optimization.
+\textbf{Off-the-shelf editor baselines.}
+For the feedback comparison in Sec.~4.1 of the main paper, we compare against the original Qwen-Image-Edit-2511 pipeline and NanoBanana Pro.
+Because both editors expose a single visual context that concatenates the source view $x^{\texttt{src}}$ and the reference $x^{\texttt{ref}}$ side by side, the prompt must first assign roles to the two images before requesting the edit:
+\begin{quote}
+\itshape
+``The first image is a 3D rendered view. The second image is the reference. Edit the first image to match the reference object's appearance. White background.''
+\end{quote}
+The prompt is a minimal adaptation of the effective instruction reported by Photo3D and is applied identically to both editors.
+Only the underlying editor backbone is swapped between runs; API-specific parameters such as sampler, classifier-free guidance scale, and number of denoising steps are listed in the released source code.
 
 % ---------------------------------------------------------------
-\section{Human Preference Study Protocols}
-\label{sec:human_study_details}
-We conduct a human preference study to complement the automatic metrics in the main paper.
+\section{User Preference Study Protocols}
+\label{sec:user_study_details}
+We conduct a user preference study to complement the automatic metrics in the main paper.
 The study focuses on whether the generated 3D assets preserve the identity of the input image while improving visual fidelity across multiple rendered views.
 
 \textbf{Study setup.}
@@ -100,141 +181,72 @@ All participants evaluate the same 100 examples, and we aggregate their preferen
 
 \begin{table}[t]
   \centering
-  \caption{Human preference study on the held-out 100-example Conceptual Design Dataset. Participants compare multi-view renderings with respect to reference fidelity, 3D consistency, and identity preservation.}
-  \label{tab:human_preference}
+  \caption{User preference study on the held-out 100-example Conceptual Design Dataset. Participants compare multi-view renderings with respect to reference fidelity, 3D consistency, and identity preservation.}
+  \label{tab:user_preference}
   \begin{tabular}{@{}lc@{}}
     \toprule
     Method & Preference Ratio $\uparrow$ \\
     \midrule
-    Pretrained (Trellis) & 23\% \\
-    Photo3D & 36\% \\
-    OREO (Ours) & \textbf{41\%} \\
+    Pretrained (Trellis) & 29\% \\
+    Photo3D & 33\% \\
+    OREO (Ours) & \textbf{38\%} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-As shown in Table~\ref{tab:human_preference}, OREO obtains the highest preference ratio.
+As shown in Table~\ref{tab:user_preference}, OREO obtains the highest preference ratio.
 This indicates that human evaluators more frequently prefer OREO's balance between reference fidelity, fine-grained visual details, and multi-view 3D consistency.
 Since only aggregate preference ratios are recorded, we report the descriptive preference results and do not include unsupported significance tests.
 
-\section{Implementation and Dataset Details}
-\label{sec:implementation_details}
-This section provides the implementation details used in our main experiments, including dataset construction, editing prompts, computational profiling, and adversarial training settings.
-
-\subsection{Conceptual Design Dataset Construction}
-\label{sec:dataset_construction}
-We construct an image-only collection to support generator post-training without paired 3D supervision.
-The dataset comprises around two thousand reference images collected from public online sources, with a focus on concept-design and stylized assets that exhibit rich appearance details and align with realistic user scenarios.
-We manually filter the collection to remove duplicates, low-resolution thumbnails, watermarked images, and content with unclear foregrounds, prioritizing reference images with clean foregrounds, well-defined silhouettes, and informative texture or material cues.
-For evaluation, we hold out a disjoint split of 100 reference images, each rendered into 5 query views by the pretrained Trellis backbone, yielding 500 evaluation pairs.
-This held-out split is used as the Conceptual Design Dataset in the main paper and is never seen during training of either OREO or the Photo3D baseline.
-We will release the curated reference images, the held-out evaluation split, and the editing prompts together with the source code.
-
-\subsection{Editing Prompts}
-\label{sec:editing_prompts}
-We use a single fixed editing instruction for all 2D feedback sources to avoid prompt-specific tuning per example.
-For Reinforced Editing as well as the off-the-shelf Qwen-Image-Edit and NanoBanana editors, we provide the rendered query view together with the conditioning reference image and the following instruction:
-\begin{quote}
-\itshape
-``The first image is a 3D rendered view. The second image is the reference. Edit the first image to match the reference object's appearance. White background.''
-\end{quote}
-This prompt is used identically during training (for OREO post-training) and during evaluation (for the editing-feedback comparison in Sec.~4.1 of the main paper); only the underlying editor backbone is swapped.
-API-specific parameters such as sampler, classifier-free guidance scale, and number of denoising steps are listed in the released source code.
-
-\subsection{Computational Overhead}
+% ---------------------------------------------------------------
+\section{Computational Overhead}
 \label{sec:computational_overhead}
-OREO post-training augments standard generator updates with online 2D editing calls, which are the main source of additional compute.
-We profile the system on a single node with 8$\times$H200 GPUs.
-Without the editing component, one full training step takes approximately 22~s.
-When the 9-step image editing process is executed sequentially on the same machine, it dominates the iteration cost and accounts for roughly 81\% of the per-step wall-clock time.
-In practice, we wrap the editor as an asynchronous service and overlap each editing call with the rollout of the next training mini-batch, so that editing latency is hidden behind generator forward and backward passes.
-With this overlap, the effective waiting time for editing drops to about 45\% of a training iteration on the same hardware, with no observed change in optimization dynamics or final quality.
-The adversarial branch (Sec.~\ref{sec:adversarial_details}) adds only marginal extra cost (about 0.1~s per step), since the discriminator reuses a frozen DINOv3-S backbone.
-Memory usage is dominated by the generator: a single H200 (140~GB) holds the model and activations within the available memory; activation checkpointing on the 3D generator further reduces the peak working set when needed for development on smaller cards.
+Each OREO training iteration consists of two costs: a generator update (rollout, render, and backward pass), and a call to the frozen 2D editor to produce the pseudo-GT $x^{\texttt{tgt}}$.
+The generator update alone takes roughly 22~s per iteration.
+If the 9-step editing call is executed sequentially inside the same iteration, it dominates the wall-clock cost, contributing about 81\% of the total per-iteration time and stretching one iteration to roughly 5$\times$ the generator-only cost.
+To avoid paying this full cost, we wrap the editor as an asynchronous service that runs in parallel with the generator update on the next batch, which reduces the residual editor time exposed to the training loop to about 45\% of a training iteration, with no observed change in optimization dynamics or final quality.
+Memory usage is dominated by the generator, and we optionally enable activation checkpointing on the 3D generator when running on memory-constrained hardware.
 
 \begin{table}[t]
   \centering
-  \caption{Computational overhead of the editing component during OREO post-training, profiled on 8$\times$H200 GPUs.}
+  \caption{Per-iteration cost breakdown for OREO post-training. \emph{Effective editor wait} is the residual editor time not overlapped by the concurrent generator update.}
   \label{tab:computational_overhead}
-  \begin{tabular}{@{}lccp{0.32\linewidth}@{}}
+  \begin{tabular}{@{}lcp{0.42\linewidth}@{}}
     \toprule
-    Component & Sequential Cost & Effective Wait & Note \\
+    Component & Cost & Note \\
     \midrule
-    9-step 2D editing & $\sim$81\% of iter. & $\sim$45\% of iter. & Async editing service overlapped with next-batch rollout. \\
-    Adversarial branch & $\sim$0.1~s/step & $\sim$0.1~s/step & Frozen DINOv3-S backbone, only multi-scale heads are trained. \\
-    Generator step (no editing) & $\sim$22~s/step & $\sim$22~s/step & Reference baseline on 8$\times$H200. \\
+    Generator update & $\sim$22~s/iter & Rollout, render, forward/backward. \\
+    Editor call (sequential) & $\sim$81\% of iter time & Dominates iteration if run in-line. \\
+    Editor call (async, effective wait) & $\sim$45\% of iter time & Overlapped with next-batch generator update. \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\subsection{Benchmark Evaluation on GSO}
-\label{sec:gso_details}
-We additionally evaluate OREO on Google Scanned Objects (GSO), a widely used image-to-3D benchmark of real scanned everyday objects.
-Whereas our Conceptual Design Dataset targets challenging in-the-wild user inputs, GSO provides a complementary distribution of common, in-domain assets that lie close to the pretrained backbone's training distribution.
-We use 77 GSO objects and render each generated mesh from 16 viewpoints uniformly sampled along a full 360$^\circ$ azimuth orbit, conditioned on a single front-view RGB image.
-We compare against the pretrained Trellis backbone and the Photo3D baseline using the same per-object conditioning images and the same rendering protocol.
-Generation quality is reported with distribution-level metrics, FID and KID, computed against ground-truth GSO renderings (78 objects, 84 views per object) using the InceptionV3 feature extractor following the standard \texttt{clean-fid} implementation.
-
-\begin{table}[t]
-  \centering
-  \caption{Distribution-level evaluation on the GSO benchmark. Lower is better; metrics are computed on InceptionV3 features against ground-truth GSO renderings.}
-  \label{tab:gso}
-  \begin{tabular}{@{}lcc@{}}
-    \toprule
-    Method & FID $\downarrow$ & KID $\downarrow$ \\
-    \midrule
-    Pretrained (Trellis) & 58.71 & 0.0081 \\
-    Photo3D & 72.94 & 0.0137 \\
-    OREO (Ours) & \textbf{57.32} & \textbf{0.0072} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-As shown in Table~\ref{tab:gso}, OREO is the only configuration that improves over the pretrained Trellis backbone on both FID and KID, indicating that the fidelity alignment learned from out-of-distribution concept-design inputs also transfers to standard in-domain assets.
-Photo3D, in contrast, shifts the appearance distribution further away from the GSO ground truth (FID $72.94$ vs.\ $58.71$), consistent with the qualitative observation in the main paper that its score-distillation supervision over-smooths textures.
-These results complement the Conceptual Design Dataset evaluation in the main paper: OREO not only narrows the larger fidelity gap on out-of-domain inputs, but also yields measurable improvements on a conventional in-domain benchmark.
-
-\subsection{Adversarial Training Details}
-\label{sec:adversarial_details}
-We implement the discriminator $D_\psi$ as a projected discriminator built on a frozen DINOv3-S image encoder (ViT-Small, 384-dim, 12 transformer blocks with register tokens).
-The encoder parameters are kept frozen throughout post-training; lightweight trainable heads are attached to the intermediate features at hook depths $\{2,5,8,11\}$, skipping the CLS and register tokens, for multi-scale real/fake classification.
-Each head is a small convolutional stack composed of a spectrally normalized $3{\times}3$ convolution, GroupNorm with 32 groups, LeakyReLU, and a residual block scaled by $1/\sqrt{2}$.
-Inputs are bilinearly resized to $518{\times}518$ before entering the encoder.
-During discriminator training, edited pseudo-GT views $x^{\texttt{tgt}}$ are treated as real samples, while rendered predictions $x^{\texttt{src}}$ are treated as fake samples.
-The discriminator is updated once per generator step (1{:}1 alternation) using a binary cross-entropy objective with logits, and discriminator gradients are clipped at norm $1.0$ for stability.
-For the generator update, the adversarial term encourages $x^{\texttt{src}}$ to be classified as real, complementing the pixel-level pseudo-GT loss with high-frequency appearance supervision.
-We use generator learning rate $1{\times}10^{-4}$ and discriminator learning rate $2{\times}10^{-5}$ (five times slower than the generator), which we found necessary for stable adversarial training given the small number of trainable parameters in the projection heads.
-The adversarial weight is $\gamma_{\text{adv}}=10^{-3}$; larger values caused the optimization to collapse, consistent with the conservative ablation discussion in the main paper.
-We also experimented with R1 gradient penalty at $\gamma_{R1}\in\{0,10^{-4},10^{-3},10^{-2}\}$ and observed no measurable effect on either training stability or final metrics: the LayerNorm operations inside the DINOv3-S blocks attenuate the input-space gradient norm to roughly $10^{-10}$, rendering the R1 term inactive in practice, and we therefore disable it by default.
-The frozen encoder is shared between forward and backward passes, so that only the multi-scale heads carry trainable parameters; this keeps the additional memory footprint and the per-step adversarial overhead small (Sec.~\ref{sec:computational_overhead}).
-All real/fake pairs are formed online from the current closed-loop optimization step, so the adversarial branch does not require any additional real 3D supervision.
-
-\subsection{Qualitative Effect of Adversarial Loss}
-High-resolution before/after crops illustrating the local texture sharpening induced by the adversarial term will be released alongside the source code.
-
+% ---------------------------------------------------------------
 \section{Limitations and Failure Cases}
 \label{sec:limitations_failure}
-While OREO improves visual fidelity in most cases, its feedback signal is still derived from 2D editing priors rather than explicit 3D supervision.
-This section discusses representative limitations observed during post-training.
+OREO inherits its appearance guidance from the 2D editing prior, and thus may also inherit the editor's compositional or viewpoint biases in rare cases.
+We identify three representative failure modes on the Conceptual Design Dataset and describe each below with a short mechanistic note.
 
-\textbf{Viewpoint drift for face-like objects.}
-When the rendered object contains a face or character-like front side, the 2D editor may prefer a canonical portrait composition.
-As a result, the edited pseudo-GT can rotate or reorient the face toward the camera instead of preserving the intended forward-facing direction of the 3D object.
-If such pseudo-GTs are repeatedly used during post-training, OREO may improve local facial details while introducing inconsistent face orientation across views.
-This failure is caused by a mismatch between 2D portrait priors and the 3D view-consistency requirement.
+\textbf{Viewpoint drift on face-like objects.}
+For face-like objects or characters, the 2D editor may rotate the face toward the camera instead of preserving the intended 3D-facing direction, leading to view-dependent orientation inconsistency.
+This drift arises from a mismatch between the 2D editor's canonical portrait prior and the 3D view-consistency requirement, so pseudo-GTs may reorient a face toward the camera; repeated use of such pseudo-GTs can improve local facial details while causing inconsistent face orientation across views.
 
-\textbf{Inherited color and style bias.}
-The dynamic noise update encourages the editing trajectory to follow the 2D editor's appearance prior more closely.
-This generally improves texture richness and perceptual quality, but it can also inherit editor-specific color or style bias.
-For objects with unusual materials, such as stone-like creatures, metallic surfaces, or highly stylized designs, the edited pseudo-GT may shift the intended hue or over-emphasize a dominant color tone.
-When such biased pseudo-GTs are repeatedly used for generator optimization, the final 3D output may preserve the geometry but deviate in color distribution.
+\textbf{Editor-inherited color and style bias.}
+The dynamic noise update tightens alignment with the editor's appearance prior and can therefore inherit editor-specific color bias on unusual materials such as stone or metallic surfaces, shifting the intended hue while preserving geometry.
+Similar biases can also appear as style shifts on stylized references whose material is far from the editor's photographic training distribution.
 
-\textbf{Weakly constrained views and fine structures.}
-OREO optimizes rendered views with online pseudo-GTs, but each editing query still observes a limited camera view.
-Regions that are rarely visible or only weakly constrained, such as back views, occluded surfaces, thin structures, and sharp material boundaries, can show slightly mismatched texture density or local decorative details.
-In such cases, OREO can improve the overall appearance while still leaving small artifacts around boundaries, appendages, or high-frequency ornaments.
+\textbf{Remaining artifacts on weakly constrained regions.}
+Rarely observed regions such as occluded surfaces, thin appendages, and sharp material boundaries receive weaker per-view supervision and can retain small local artifacts on back views and along thin structures.
+These regions are also under-constrained by the reference $x^{\texttt{ref}}$, which only depicts a single canonical viewpoint.
 
-These failure cases suggest that future work could incorporate stronger multi-view consistency constraints, 3D-aware editing models, or uncertainty-aware filtering of pseudo-GTs before they are used for generator updates.
+\textbf{Reliance on jointly-modeled geometry and appearance.}
+OREO is designed for 3D generators such as Trellis whose latent space jointly encodes geometry and appearance, so a single latent update can simultaneously refine texture detail while keeping structure stable through the velocity regularizer.
+For pipelines that decouple geometry and texture, e.g., generating a mesh first and then baking a texture map in a separate stage, the contrastive signal from an edited RGB view can only supervise the texture stage and is largely disconnected from the geometry decoder.
+In this decoupled setting, we expect the fidelity gain to be smaller and, more importantly, structural consistency between the geometry and the injected appearance is no longer regularized by the same optimizer.
+Extending OREO to decoupled pipelines therefore requires either a texture-only variant of the contrastive objective or an additional geometry-aware regularizer on the mesh stage; we leave this as future work.
+
+These observations suggest future directions such as stronger multi-view consistency constraints, 3D-aware editing models, or uncertainty-aware filtering of pseudo-GTs before they are used for generator updates.
 
 % ---------------------------------------------------------------
 % References

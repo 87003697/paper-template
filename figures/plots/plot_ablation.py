@@ -13,21 +13,24 @@ plt.rcParams['xtick.labelsize'] = 12
 plt.rcParams['ytick.labelsize'] = 12
 plt.rcParams['legend.fontsize'] = 12
 
+# Data aggregated from eval_metrics_full-rndm_steps-*_cfg-4_src-0_prompt_v15/
+# guidance_similarity.csv (deduped by test+view, n=501).
+
 # Data for Effect of Editing Ratio (Fixed N=12)
 # Ratio: 0.25, 0.50, 0.75, 1.00
 # Steps: 3|12, 6|12, 9|12, 12|12
 ratios = [0.25, 0.50, 0.75, 1.00]
-ratio_clip_delta = [0.0034, 0.0031, 0.0123, -0.0738]
-ratio_dino_delta = [0.0029, 0.0144, 0.0311, -0.0080]
-ratio_iou = [0.9925, 0.9804, 0.9397, 0.6541]
+ratio_clip_delta = [0.0024, 0.0040, 0.0379, -0.0416]
+ratio_dino_delta = [0.0012, 0.0065, 0.0299, -0.0628]
+ratio_iou        = [0.9933, 0.9869, 0.9520,  0.6891]
 
 # Data for Effect of Absolute Steps (Fixed Ratio ~0.75)
 # Steps: 6|8, 9|12, 15|20, 30|40
-# Total Steps N: 8, 12, 20, 40
+# Editing steps N_e: 6, 9, 15, 30
 steps_N = [6, 9, 15, 30]
-steps_clip_delta = [0.0061, 0.0123, 0.0177, 0.0216]
-steps_dino_delta = [0.0240, 0.0311, 0.0398, 0.0474]
-steps_iou = [0.9489, 0.9397, 0.9280, 0.9159]
+steps_clip_delta = [0.0226, 0.0379, 0.0496, 0.0614]
+steps_dino_delta = [0.0171, 0.0299, 0.0358, 0.0450]
+steps_iou        = [0.9666, 0.9520, 0.9360, 0.9205]
 
 # Create figure with two subplots
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
@@ -82,5 +85,5 @@ ax2.set_title('(b) Effect of Absolute Steps (Fixed Ratio $\\approx 0.75$)', font
 ax2.set_xticks(steps_N)
 
 plt.tight_layout()
-plt.savefig('figures/plots/ablation_ratio_steps.png', dpi=300, bbox_inches='tight')
-print("Plot saved to figures/plots/ablation_ratio_steps.png")
+plt.savefig('figures_final/ablation_ratio_steps.png', dpi=300, bbox_inches='tight')
+print("Plot saved to figures_final/ablation_ratio_steps.png")
